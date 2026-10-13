@@ -1,0 +1,33 @@
+# --- Secretos: nunca se versionan ---
+.env
+.env.*
+!.env.example
+
+# --- Datos: contienen información personal de clientes ---
+data/**
+!data/.gitkeep
+
+# --- Plantillas reales del ERP (pueden tener datos); solo se versiona la documentación ---
+templates/erp/*
+!templates/erp/README.md
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Editores / SO ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp

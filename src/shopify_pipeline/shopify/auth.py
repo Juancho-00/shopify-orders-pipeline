@@ -1,0 +1,127 @@
+"""
+Autenticación contra la Admin API de Shopify.
+
+Dos modos:
+
+* ``StaticTokenProvider``: token permanente ``shpat_...`` de una custom app *legacy*
+  (creada en el admin de Shopify antes del 1-ene-2026).
+* ``ClientCredentialsTokenProvider``: apps creadas en el Dev Dashboard. Intercambia
+  ``client_id`` + ``client_secret`` por un token que expira (~24 h) y lo renueva solo.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from typing import Protocol
+
+import requests
+
+from shopify_pipeline.config import ShopifyConfig
+from shopify_pipeline.exceptions import ShopifyAuthError
+
+logger = logging.getLogger(__name__)
+
+
+class TokenProvider(Protocol):
+    def get_token(self) -> str: ...
+
+    def invalidate(self) -> bool:
+        """Descarta el token actual. Devuelve True si es posible obtener uno nuevo."""
+        ...
+
+
+class StaticTokenProvider:
+    """Token permanente de una custom app legacy. No se puede renovar."""
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def get_token(self) -> str:
+        return self._token
+
+    def invalidate(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:  # Nunca exponer el token.
+        return "StaticTokenProvider(token=***)"
+
+
+class ClientCredentialsTokenProvider:
+    """
+    Client Credentials Grant (thread-safe).
+
+    Renueva el token ``refresh_margin`` segundos antes de que expire, o cuando el
+    cliente lo invalida tras recibir un 401.
+    """
+
+    def __init__(
+        self,
+        shop_domain: str,
+        client_id: str,
+        client_secret: str,
+        timeout: tuple[float, float] = (10.0, 30.0),
+        refresh_margin: float = 300.0,
+        session: requests.Session | None = None,
+    ) -> None:
+        self._url = f"https://{shop_domain}/admin/oauth/access_token"
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._timeout = timeout
+        self._margin = refresh_margin
+        self._session = session or requests.Session()
+        self._token: str | None = None
+        self._expires_at = 0.0
+        self._lock = threading.Lock()
+
+    def get_token(self) -> str:
+        with self._lock:
+            if self._token is None or time.monotonic() >= self._expires_at - self._margin:
+                self._fetch()
+            assert self._token is not None
+            return self._token
+
+    def invalidate(self) -> bool:
+        with self._lock:
+            self._token = None
+        return True
+
+    def _fetch(self) -> None:
+        logger.info("Solicitando access token (client credentials)...")
+        try:
+            resp = self._session.post(
+                self._url,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                },
+                timeout=self._timeout,
+            )
+        except requests.RequestException as exc:
+            raise ShopifyAuthError(f"No se pudo contactar el endpoint de OAuth: {exc}") from exc
+
+        if resp.status_code != 200:
+            # No se registra el cuerpo: podría reflejar los parámetros enviados.
+            raise ShopifyAuthError(
+                f"Fallo al obtener token (HTTP {resp.status_code}). Verifique client_id/secret, "
+                "que la app esté instalada en la tienda y que la versión con scopes esté publicada."
+            )
+        payload = resp.json()
+        self._token = payload["access_token"]
+        self._expires_at = time.monotonic() + float(payload.get("expires_in", 86_399))
+        logger.info("Token obtenido. Scopes: %s", payload.get("scope", "n/d"))
+
+    def __repr__(self) -> str:
+        return "ClientCredentialsTokenProvider(client_secret=***)"
+
+
+def build_token_provider(config: ShopifyConfig) -> TokenProvider:
+    """Elige el modo de autenticación según las credenciales disponibles."""
+    if config.access_token:
+        return StaticTokenProvider(config.access_token)
+    assert config.client_id and config.client_secret
+    return ClientCredentialsTokenProvider(
+        config.shop_domain, config.client_id, config.client_secret, timeout=config.timeout
+    )

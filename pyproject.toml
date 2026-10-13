@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shopify-pipeline"
+version = "0.1.0"
+description = "Pipeline de integración Shopify → ERP: extracción, conciliación y carga de pedidos."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Juan Pablo Quintero" }]
+dependencies = [
+    "requests>=2.31",
+    "tenacity>=8.2",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "responses>=0.25",
+    "ruff>=0.6",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+shopify-pipeline = "shopify_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.coverage.run]
+source = ["shopify_pipeline"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # Permite tildes y caracteres en español.
