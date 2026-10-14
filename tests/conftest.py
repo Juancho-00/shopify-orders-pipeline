@@ -27,6 +27,7 @@ def _clean_env(monkeypatch):
         "SHOPIFY_ACCESS_TOKEN",
         "SHOPIFY_CLIENT_ID",
         "SHOPIFY_CLIENT_SECRET",
+        "SIESA_CODIGO_ENVIO",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -50,7 +51,7 @@ def client(config, sleeps) -> ShopifyClient:
 @pytest.fixture
 def flt() -> OrderFilter:
     now = datetime(2026, 10, 13, tzinfo=timezone.utc)
-    return OrderFilter(created_at_min=now - timedelta(days=7), created_at_max=now)
+    return OrderFilter(date_min=now - timedelta(days=7), date_max=now)
 
 
 @pytest.fixture

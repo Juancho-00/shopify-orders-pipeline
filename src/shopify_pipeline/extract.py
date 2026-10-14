@@ -3,11 +3,12 @@ Orquestación de la fase 1: extracción de pedidos de Shopify a la zona *raw*.
 
 Cada corrida genera dos archivos con el mismo ``run_id``:
 
-    data/raw/shopify/orders/<run_id>.jsonl          # un pedido por línea, tal cual lo entrega Shopify
+    data/raw/shopify/orders/<run_id>.jsonl          # un pedido por línea (+ sus bodegas)
     data/raw/shopify/orders/<run_id>.manifest.json  # metadatos de la corrida (ventana, conteos, versión)
 
-El manifiesto es el contrato con la fase 2 (conciliación): indica qué ventana se
-extrajo y si el conteo cuadró contra Shopify.
+El JSONL guarda el pedido tal cual lo entrega Shopify y, si se consultaron las bodegas,
+la clave adicional ``_fulfillment_orders``. Con ese archivo se puede regenerar el
+reporte para Siesa sin volver a llamar a la API (comando ``transform``).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from shopify_pipeline import __version__
 from shopify_pipeline.shopify.client import ShopifyClient
+from shopify_pipeline.shopify.fulfillment import BodegaEnricher
 from shopify_pipeline.shopify.orders import OrderFilter, count_orders, extract_orders
 from shopify_pipeline.sinks.jsonl import write_jsonl
 
@@ -35,10 +37,12 @@ class ExtractionResult:
     shop_domain: str
     api_version: str
     status_filter: str
-    created_at_min: str
-    created_at_max: str
+    date_field: str
+    date_min: str
+    date_max: str
     expected_count: int
     written_count: int
+    bodegas_consultadas: int
     duration_seconds: float
     output_file: str
     pipeline_version: str = __version__
@@ -59,25 +63,31 @@ def run_extraction(
     flt: OrderFilter,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     run_id: str | None = None,
+    consultar_bodega: bool = True,
 ) -> ExtractionResult:
-    """Extrae pedidos, los escribe en JSONL y genera el manifiesto de la corrida."""
+    """Extrae pedidos (y su bodega), los escribe en JSONL y genera el manifiesto."""
     run_id = run_id or new_run_id()
     output_file = output_dir / f"{run_id}.jsonl"
     cfg = client.config
 
     logger.info(
-        "Extrayendo pedidos de %s (API %s) | status=%s | %s → %s",
+        "Extrayendo pedidos de %s (API %s) | status=%s | %s %s → %s",
         cfg.shop_domain,
         cfg.api_version,
         flt.status,
-        flt.created_at_min.isoformat(),
-        flt.created_at_max.isoformat(),
+        flt.date_field,
+        flt.date_min.isoformat(),
+        flt.date_max.isoformat(),
     )
     expected = count_orders(client, flt)
     logger.info("Shopify reporta %d pedidos en la ventana.", expected)
 
     t0 = time.perf_counter()
-    written = write_jsonl(extract_orders(client, flt), output_file)
+    orders = extract_orders(client, flt)
+    enricher = BodegaEnricher(client) if consultar_bodega else None
+    if enricher:
+        orders = enricher.enrich(orders)
+    written = write_jsonl(orders, output_file)
     duration = round(time.perf_counter() - t0, 2)
 
     result = ExtractionResult(
@@ -85,10 +95,12 @@ def run_extraction(
         shop_domain=cfg.shop_domain,
         api_version=cfg.api_version,
         status_filter=flt.status,
-        created_at_min=flt.created_at_min.isoformat(),
-        created_at_max=flt.created_at_max.isoformat(),
+        date_field=flt.date_field,
+        date_min=flt.date_min.isoformat(),
+        date_max=flt.date_max.isoformat(),
         expected_count=expected,
         written_count=written,
+        bodegas_consultadas=enricher.enriched if enricher else 0,
         duration_seconds=duration,
         output_file=output_file.name,
     )

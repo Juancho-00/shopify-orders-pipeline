@@ -11,6 +11,8 @@ from shopify_pipeline.shopify.client import ShopifyClient
 
 MAX_PAGE_SIZE = 250  # Máximo permitido por Shopify en endpoints REST de listado.
 VALID_STATUSES = frozenset({"open", "closed", "cancelled", "any"})
+# Campo de fecha por el que se filtra la ventana. Ambos los soportan orders.json y orders/count.json.
+VALID_DATE_FIELDS = frozenset({"created_at", "updated_at"})
 
 
 @dataclass(frozen=True)
@@ -18,22 +20,32 @@ class OrderFilter:
     """
     Filtros de la consulta.
 
-    Se usa una ventana cerrada [created_at_min, created_at_max] fijada al inicio de la
-    corrida: los pedidos que entren durante la extracción no alteran el resultado y la
-    corrida es reproducible.
+    Se usa una ventana cerrada [date_min, date_max] fijada al inicio de la corrida: los
+    pedidos que entren durante la extracción no alteran el resultado y la corrida es
+    reproducible.
+
+    ``date_field`` define sobre qué fecha se aplica la ventana:
+
+    * ``created_at`` (default): pedidos *creados* en la ventana.
+    * ``updated_at``: pedidos *modificados* en la ventana. Sirve para capturar pedidos
+      creados antes cuyo pago se confirmó después (p. ej. contraentrega), porque marcar
+      el pago actualiza el pedido.
     """
 
-    created_at_min: datetime
-    created_at_max: datetime
+    date_min: datetime
+    date_max: datetime
     status: str = "any"  # Shopify usa "open" por defecto: con "any" no se pierden cerrados/cancelados.
     fields: tuple[str, ...] | None = None  # Proyección de campos: reduce payload y latencia.
     page_size: int = MAX_PAGE_SIZE
+    date_field: str = "created_at"
 
     def __post_init__(self) -> None:
-        if self.created_at_min.tzinfo is None or self.created_at_max.tzinfo is None:
+        if self.date_min.tzinfo is None or self.date_max.tzinfo is None:
             raise ValueError("Use datetimes con zona horaria (timezone-aware).")
-        if self.created_at_min >= self.created_at_max:
-            raise ValueError("created_at_min debe ser anterior a created_at_max.")
+        if self.date_min >= self.date_max:
+            raise ValueError("La fecha inicial debe ser anterior a la fecha final.")
+        if self.date_field not in VALID_DATE_FIELDS:
+            raise ValueError(f"date_field inválido: {self.date_field}. Opciones: {sorted(VALID_DATE_FIELDS)}")
         if self.status not in VALID_STATUSES:
             raise ValueError(f"status inválido: {self.status}. Opciones: {sorted(VALID_STATUSES)}")
         if not 1 <= self.page_size <= MAX_PAGE_SIZE:
@@ -47,14 +59,14 @@ class OrderFilter:
         if days <= 0:
             raise ValueError("days debe ser mayor que 0.")
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        return cls(created_at_min=now - timedelta(days=days), created_at_max=now, **kwargs)
+        return cls(date_min=now - timedelta(days=days), date_max=now, **kwargs)
 
     def filter_params(self) -> dict[str, Any]:
         """Filtros comunes a ``orders.json`` y ``orders/count.json``."""
         return {
             "status": self.status,
-            "created_at_min": self.created_at_min.isoformat(),
-            "created_at_max": self.created_at_max.isoformat(),
+            f"{self.date_field}_min": self.date_min.isoformat(),
+            f"{self.date_field}_max": self.date_max.isoformat(),
         }
 
     def list_params(self) -> dict[str, Any]:

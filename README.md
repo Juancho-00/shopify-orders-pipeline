@@ -1,17 +1,21 @@
 # shopify-orders-pipeline
 
-Pipeline de integración **Shopify → ERP** para Luisa Chimá S.A.S.
+Pipeline de integración **Shopify → Siesa** para Luisa Chimá S.A.S.
 
-| Fase             | Descripción                                                      | Estado       |
-| ---------------- | ----------------------------------------------------------------- | ------------ |
-| 1. Extracción   | Descarga los pedidos de Shopify (REST Admin API) a la zona`raw` | ✅ Lista     |
-| 2. Conciliación | Verifica que los pedidos extraídos de Shopify existan en el ERP  | ⏳ Pendiente |
-| 3. Carga al ERP  | Crea clientes y pedidos faltantes en el ERP según sus plantillas | ⏳ Pendiente |
+| Fase | Descripción | Estado |
+|---|---|---|
+| 1. Extracción | Descarga los pedidos de Shopify y genera el reporte línea por línea para Siesa | ✅ Lista |
+| 2. Conciliación | Verifica que los pedidos extraídos de Shopify existan en Siesa | ⏳ Pendiente |
+| 3. Carga a Siesa | Crea clientes y pedidos faltantes en Siesa según sus plantillas | ⏳ Pendiente |
 
 ```
-Shopify ──(1) extract──► data/raw/shopify/orders/*.jsonl ──(2) reconcile──► faltantes ──(3) load──► ERP
-                                     + manifest.json                              │
-                                                                       data/reconciliation/
+                  (1) extract                                 (1) transform
+Shopify ──────────────────────────► data/raw/...jsonl ─────────────────────► data/processed/siesa/
+  pedidos + bodega por pedido        + manifest.json                         pedidos_siesa_<run>.csv / .xlsx
+                                                                                      │
+                                                    (2) reconcile ◄───────────────────┘
+                                                          │
+                                                    (3) load ──► Siesa
 ```
 
 ---
@@ -26,11 +30,17 @@ shopify-orders-pipeline/
 │   ├── shopify/
 │   │   ├── auth.py          # Token estático (legacy) o Client Credentials (Dev Dashboard)
 │   │   ├── client.py        # HTTP: reintentos, rate limiting, paginación por Link header
-│   │   └── orders.py        # Filtros de pedidos y extracción
+│   │   ├── orders.py        # Filtros de pedidos y extracción
+│   │   └── fulfillment.py   # Bodega de salida de cada línea (fulfillment orders)
+│   ├── transform/
+│   │   ├── normalize.py     # Nombres, apellidos, cédula/NIT, teléfono, fechas, montos
+│   │   ├── siesa_lines.py   # Pedido → filas para Siesa (productos + envío) + alertas/exclusiones
+│   │   └── run.py           # JSONL crudo → CSV + Excel + log de alertas
 │   ├── sinks/
 │   │   ├── base.py          # Contrato Sink
-│   │   └── jsonl.py         # Escritura atómica a JSON Lines
-│   ├── extract.py           # Orquestación de la fase 1 + manifiesto de la corrida
+│   │   ├── jsonl.py         # Escritura atómica a JSON Lines
+│   │   └── tabular.py       # CSV y Excel
+│   ├── extract.py           # Orquestación de la extracción + manifiesto de la corrida
 │   ├── reconciliation/      # Fase 2 (pendiente)
 │   ├── erp/                 # Fase 3 (pendiente)
 │   └── cli.py               # Comando `shopify-pipeline`
@@ -39,6 +49,8 @@ shopify-orders-pipeline/
 ├── templates/erp/           # Plantillas de carga del ERP (fase 3; no se versionan)
 ├── data/                    # Salidas locales (no se versionan: datos personales)
 ├── docs/
+│   ├── mapeo_siesa.md       # Origen y regla de cada columna del reporte (para el ticket de Siesa)
+│   └── decisiones.md        # Decisiones técnicas y su motivo
 ├── .github/workflows/ci.yml # Lint + pruebas en cada push / PR
 ├── .env.example             # Plantilla de credenciales (sin secretos)
 ├── .pre-commit-config.yaml  # ruff + gitleaks (bloquea tokens en commits)
@@ -89,16 +101,26 @@ pytest
 2. Usa el **dominio interno** `tu-tienda.myshopify.com`, no el dominio público.
 3. Elige **uno** de los dos modos de autenticación:
 
-| Modo                                       | Cuándo                                                                                                                                          | Variables                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| **Client Credentials** (recomendado) | Apps creadas en el**Dev Dashboard** (obligatorio para apps nuevas desde el 1-ene-2026). El token dura ~24 h y el pipeline lo renueva solo. | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` |
-| **Token estático**                  | Custom app*legacy* creada en el admin de Shopify antes de 2026. Token permanente `shpat_...`.                                                | `SHOPIFY_ACCESS_TOKEN`                         |
+| Modo | Cuándo | Variables |
+|---|---|---|
+| **Client Credentials** (recomendado) | Apps creadas en el **Dev Dashboard** (obligatorio para apps nuevas desde el 1-ene-2026). El token dura ~24 h y el pipeline lo renueva solo. | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` |
+| **Token estático** | Custom app *legacy* creada en el admin de Shopify antes de 2026. Token permanente `shpat_...`. | `SHOPIFY_ACCESS_TOKEN` |
 
 ### Crear la app en el Dev Dashboard
 
 1. Shopify admin → **Settings → Apps → Develop apps → Build apps in Dev Dashboard**.
-2. Crear la app → **Versions** → asignar el scope `read_orders` → **Release**.
-   Si se necesitan pedidos de hace más de 60 días, agregar también `read_all_orders`.
+2. Crear la app → **Versions** → asignar los scopes → **Release**:
+
+   | Scope | Para qué |
+   |---|---|
+   | `read_orders` | Leer pedidos (últimos 60 días) |
+   | `read_merchant_managed_fulfillment_orders` | Bodega de salida de cada producto |
+   | `read_locations` | Listar bodegas para armar la tabla de equivalencias con Siesa |
+   | `read_all_orders` *(opcional)* | Solo si se necesitan pedidos de hace más de 60 días |
+
+   Los datos personales del cliente (nombre, dirección, teléfono, email) son *datos
+   protegidos* en Shopify. Una app personalizada instalada en la propia tienda los recibe
+   sin trámite adicional; si llegan vacíos (`null`), hay que revisar ese permiso en la app.
 3. Instalar la app en la tienda desde la pestaña **Home**.
 4. Copiar **Client ID** y **Client secret** desde **Settings** al archivo `.env`.
 
@@ -106,17 +128,35 @@ pytest
 
 ---
 
-## Fase 1: extracción de pedidos
+## Fase 1: extracción de pedidos y reporte para Siesa
 
 ```powershell
-# Últimos 7 días, todos los estados (default)
+# Últimos 7 días: extrae, consulta bodegas y genera el reporte Siesa (default)
 shopify-pipeline extract
+
+# Pedidos de ayer en adelante, con el código real del ítem de envío en Siesa
+shopify-pipeline extract --days 1 --codigo-envio FLETE01
+
+# Rehacer el reporte de la última extracción sin llamar a Shopify (p. ej. tras cambiar una regla)
+shopify-pipeline transform
 
 # Ventana explícita (fechas en UTC, o ISO con zona horaria)
 shopify-pipeline extract --since 2026-10-01 --until "2026-10-08T00:00:00-05:00"
 
 # Solo algunos campos (reduce el tamaño de la respuesta)
 shopify-pipeline extract --days 3 --fields name,created_at,financial_status,total_price,customer,line_items
+
+# Sin consultar bodegas (una llamada menos por pedido)
+shopify-pipeline extract --sin-bodega
+
+# Ventana sobre la fecha de última actualización (recomendado para la tarea programada)
+shopify-pipeline extract --days 2 --filtrar-por actualizacion
+
+# Incluir pedidos cancelados o de prueba (se excluyen por defecto)
+shopify-pipeline extract --incluir-cancelados --incluir-pruebas
+
+# Incluir pedidos sin pago confirmado (solo para revisión; no para cargar a Siesa)
+shopify-pipeline extract --estados-pago todos
 
 # Fallar (código 3) si el conteo no cuadra contra Shopify; útil en tareas programadas
 shopify-pipeline extract --days 1 --strict
@@ -129,12 +169,20 @@ También funciona `python -m shopify_pipeline extract ...`.
 
 ### Salida
 
-Cada corrida genera dos archivos con el mismo identificador (`run_id`, en UTC):
+Cada corrida genera estos archivos con el mismo identificador (`run_id`, en UTC):
 
 ```
-data/raw/shopify/orders/20261013T161500Z.jsonl           # un pedido por línea, tal cual lo entrega Shopify
-data/raw/shopify/orders/20261013T161500Z.manifest.json   # metadatos de la corrida
+data/raw/shopify/orders/20261013T161500Z.jsonl              # todos los pedidos de la ventana (Shopify + _fulfillment_orders)
+data/raw/shopify/orders/20261013T161500Z.manifest.json      # metadatos de la corrida
+data/processed/siesa/pedidos_siesa_20261013T161500Z.csv     # reporte para cargas automáticas
+data/processed/siesa/pedidos_siesa_20261013T161500Z.xlsx    # el mismo reporte para revisar en Excel
+data/logs/alertas_20261013T161500Z.csv                      # alertas y pedidos excluidos
+data/logs/shopify_pipeline_20261013.log                     # bitácora de todas las ejecuciones del día
 ```
+
+> Abre el **.xlsx** en Excel. El .csv usa punto decimal y Excel en español lo interpretaría mal.
+
+Manifiesto de la corrida:
 
 ```json
 {
@@ -142,11 +190,13 @@ data/raw/shopify/orders/20261013T161500Z.manifest.json   # metadatos de la corri
   "shop_domain": "tienda.myshopify.com",
   "api_version": "2026-10",
   "status_filter": "any",
-  "created_at_min": "2026-10-06T16:15:00+00:00",
-  "created_at_max": "2026-10-13T16:15:00+00:00",
+  "date_field": "created_at",
+  "date_min": "2026-10-06T16:15:00+00:00",
+  "date_max": "2026-10-13T16:15:00+00:00",
   "expected_count": 128,
   "written_count": 128,
-  "duration_seconds": 3.4,
+  "bodegas_consultadas": 128,
+  "duration_seconds": 64.2,
   "output_file": "20261013T161500Z.jsonl",
   "reconciled": true
 }
@@ -155,14 +205,67 @@ data/raw/shopify/orders/20261013T161500Z.manifest.json   # metadatos de la corri
 El manifiesto es el contrato con la fase 2: indica qué ventana se extrajo y si el
 conteo cuadró contra `orders/count.json` de Shopify.
 
+### Reporte para Siesa
+
+Una fila por producto, más una fila de envío cuando el envío cobrado es mayor a cero.
+El detalle de cada columna (origen en Shopify y regla) está en
+[`docs/mapeo_siesa.md`](docs/mapeo_siesa.md).
+
+Ejemplo con el pedido de prueba #1006 (datos del cliente anonimizados):
+
+| documento_referencia | tipo_documento | numero_documento | primer_nombre | primer_apellido | tipo_linea | referencia | bodega | cantidad | precio_unitario |
+|---|---|---|---|---|---|---|---|---|---|
+| 1006 | CC | 1017000001 | Laura | Restrepo | PRODUCTO | KITK0108 | Bodega Principal Medellín | 1 | 89999.00 |
+| 1006 | CC | 1017000001 | Laura | Restrepo | ENVIO | ENVIO | | 1 | 12294.34 |
+
+Reglas clave:
+
+- **Solo pago confirmado:** se extraen todos los pedidos, pero al reporte solo pasan los de
+  estado `paid` o `partially_refunded`. Cancelados y de prueba también se excluyen.
+- **Cédula / NIT:** se lee de `billing_address.company` (respaldo: `shipping_address.company`),
+  se limpia (sin puntos ni espacios) y se deduce si es CC o NIT. La regla para identificar
+  NIT es provisional: los NIT deducidos solo por formato quedan como `NIT_POR_VERIFICAR`.
+- **Envío:** solo genera línea si el valor cobrado es mayor a cero.
+- **Precios:** producto y envío van con IVA incluido, tal como los cobra Shopify.
+- **Control de totales:** la suma de las líneas debe ser igual al total del pedido en Shopify.
+
+### Log de alertas
+
+Las alertas no van en el reporte. Cada corrida escribe `data/logs/alertas_<run_id>.csv`
+con una fila por evento, sin datos personales del cliente:
+
+| tipo | codigo | pedido_shopify | numero_linea | detalle |
+|---|---|---|---|---|
+| ALERTA | NIT_POR_VERIFICAR | #1010 | | |
+| ALERTA | SIN_SKU | #1011 | 2 | |
+| EXCLUIDO | PAGO_NO_CONFIRMADO | #1012 | | estado_pago=pending |
+
+Revisa este archivo antes de cargar a Siesa. La lista completa de códigos está en
+[`docs/mapeo_siesa.md`](docs/mapeo_siesa.md#log-de-alertas).
+
+### Pedidos que se pagan días después (contraentrega)
+
+Por defecto la ventana se aplica sobre la **fecha de creación**. Un pedido contraentrega
+creado el lunes y pagado el jueves se lee el lunes como `pending` (queda excluido) y la
+extracción del jueves ya no lo incluye. Para la ejecución programada usa:
+
+```powershell
+shopify-pipeline extract --days 2 --filtrar-por actualizacion
+```
+
+Así la ventana se aplica sobre la **última modificación**: cuando se registra el pago, el
+pedido se actualiza y entra en la corrida de ese día. Un mismo pedido puede volver a
+aparecer si se modifica después (por ejemplo, al despacharlo); la conciliación de la fase 2
+evitará cargarlo dos veces en Siesa.
+
 ### Códigos de salida
 
-| Código | Significado                                                       | Acción                                      |
-| ------- | ----------------------------------------------------------------- | -------------------------------------------- |
-| `0`   | Éxito                                                            | —                                           |
-| `1`   | Error transitorio (red, 5xx, 429) tras agotar reintentos          | Reintentar más tarde                        |
-| `2`   | Configuración o credenciales (401, 403, 404,`.env` incompleto) | Corregir configuración; reintentar no sirve |
-| `3`   | Extracción completa, pero el conteo no cuadra (`--strict`)     | Revisar antes de conciliar                   |
+| Código | Significado | Acción |
+|---|---|---|
+| `0` | Éxito | — |
+| `1` | Error transitorio (red, 5xx, 429) tras agotar reintentos | Reintentar más tarde |
+| `2` | Configuración o credenciales (401, 403, 404, `.env` incompleto) | Corregir configuración; reintentar no sirve |
+| `3` | Extracción completa, pero el conteo no cuadra (`--strict`) | Revisar antes de conciliar |
 
 ### Cómo funciona
 
@@ -176,8 +279,11 @@ conteo cuadró contra `orders/count.json` de Shopify.
 - **Reintentos:** 5xx, timeouts y errores de red, con backoff exponencial y jitter (máx. 6 intentos).
 - **Sin reintento:** 401 (salvo una renovación de token en modo Client Credentials), 403, 404 y demás 4xx.
 - **Filtros:** `status=any` (Shopify usa `open` por defecto y omitiría cerrados y cancelados),
-  ventana cerrada `created_at_min`/`created_at_max` fijada al iniciar la corrida, `limit=250`
-  (el máximo) y proyección opcional con `fields`.
+  ventana cerrada fijada al iniciar la corrida sobre `created_at` o `updated_at`
+  (`--filtrar-por`), `limit=250` (el máximo) y proyección opcional con `fields`.
+- **Bodega:** el pedido no trae la bodega por línea; se consulta
+  `orders/{id}/fulfillment_orders.json` (una llamada por pedido, con el mismo control de
+  rate limit). Si falta el permiso, la extracción continúa y marca `BODEGA_NO_CONSULTADA`.
 - **Escritura atómica:** se escribe a un temporal y se renombra al final; si algo falla,
   no queda un archivo a medias.
 
@@ -189,35 +295,36 @@ conteo cuadró contra `orders/count.json` de Shopify.
 
 ---
 
-## Fase 2: conciliación con el ERP (pendiente)
+## Fase 2: conciliación con Siesa (pendiente)
 
-Objetivo: comprobar que cada pedido extraído de Shopify exista en el ERP.
+Objetivo: comprobar que cada pedido extraído de Shopify exista en Siesa. La llave de cruce
+es `documento_referencia` (consecutivo de Shopify, p. ej. `1006`).
 
 Diseño previsto (`src/shopify_pipeline/reconciliation/`):
 
 1. Leer la última extracción de `data/raw/shopify/orders/` usando su manifiesto.
-2. Consultar en el ERP los pedidos de la misma ventana de fechas.
+2. Consultar en Siesa los pedidos de la misma ventana de fechas.
 3. Cruzar por la llave acordada (p. ej. `order.name` `#1001` o `order.id` de Shopify
-   contra el campo de referencia externa del ERP).
+   contra el campo de referencia externa de Siesa).
 4. Clasificar cada pedido:
    - **En ambos:** conciliado.
-   - **Solo en Shopify:** faltante en el ERP → entrada de la fase 3.
-   - **Solo en el ERP:** revisar (pedido manual o error de referencia).
+   - **Solo en Shopify:** faltante en Siesa → entrada de la fase 3.
+   - **Solo en Siesa:** revisar (pedido manual o error de referencia).
    - **Con diferencias:** total, estado o cliente distintos.
 5. Generar el reporte en `data/reconciliation/<run_id>/`.
 
 **Información pendiente:**
 
-- [ ] Nombre del ERP y forma de acceso (API, consulta a base de datos, exportación de archivo).
-- [ ] Campo del ERP que guarda la referencia del pedido de Shopify.
+- [ ] Forma de acceso a Siesa (API, consulta a base de datos, exportación de archivo).
+- [ ] Campo de Siesa que guarda el documento de referencia de Shopify.
 - [ ] Reglas de comparación: qué diferencias en totales o estados se toleran.
 
 ---
 
-## Fase 3: creación de clientes y pedidos en el ERP (pendiente)
+## Fase 3: creación de clientes y pedidos en Siesa (pendiente)
 
-Objetivo: crear en el ERP los clientes y pedidos que la fase 2 marque como faltantes,
-usando las plantillas de carga del ERP.
+Objetivo: crear en Siesa los clientes y pedidos que la fase 2 marque como faltantes,
+usando las plantillas de carga de Siesa.
 
 Diseño previsto (`src/shopify_pipeline/erp/`):
 
@@ -225,7 +332,7 @@ Diseño previsto (`src/shopify_pipeline/erp/`):
 2. Crear primero los clientes que no existan; después, los pedidos.
 3. Mapear cada campo de Shopify a la columna de la plantilla, validando tipo, longitud
    y obligatoriedad antes de generar la carga.
-4. Generar los archivos de carga (o llamar la API del ERP) de forma idempotente: volver
+4. Generar los archivos de carga (o llamar la API de Siesa) de forma idempotente: volver
    a ejecutar no debe duplicar clientes ni pedidos.
 
 **Información pendiente:**
@@ -246,7 +353,9 @@ pre-commit run --all-files   # todos los hooks
 ```
 
 Las pruebas no llaman a Shopify: la librería `responses` simula la API, incluyendo
-paginación, 429, 5xx, 401/403/404 y renovación de token.
+paginación, 429, 5xx, 401/403/404, renovación de token y bodegas. La transformación se
+prueba con el pedido real #1006 **anonimizado** (`tests/fixtures/order_1006.json`): nunca
+guardes en el repo pedidos con datos reales de clientes.
 
 ## Seguridad
 

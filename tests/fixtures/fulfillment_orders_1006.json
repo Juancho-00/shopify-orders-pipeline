@@ -1,0 +1,47 @@
+{
+  "fulfillment_orders": [
+    {
+      "id": 7001,
+      "shop_id": 1,
+      "order_id": 18931603603821,
+      "assigned_location_id": 80001,
+      "request_status": "unsubmitted",
+      "status": "open",
+      "supported_actions": [
+        "create_fulfillment"
+      ],
+      "destination": {
+        "city": "Medellin"
+      },
+      "line_items": [
+        {
+          "id": 1,
+          "shop_id": 1,
+          "fulfillment_order_id": 7001,
+          "quantity": 1,
+          "line_item_id": 50783188156781,
+          "inventory_item_id": 5,
+          "fulfillable_quantity": 1,
+          "variant_id": 53965101039981
+        }
+      ],
+      "fulfill_at": null,
+      "international_duties": null,
+      "fulfillment_holds": [],
+      "delivery_method": {
+        "method_type": "shipping"
+      },
+      "assigned_location": {
+        "address1": "Cra 50 # 10-10",
+        "city": "Medellín",
+        "country_code": "CO",
+        "location_id": 80001,
+        "name": "Bodega Principal Medellín",
+        "phone": null,
+        "province": "Antioquia",
+        "zip": "050001"
+      },
+      "merchant_requests": []
+    }
+  ]
+}

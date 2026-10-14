@@ -18,15 +18,27 @@ def test_filter_params(flt):
     assert "fields" not in params
 
 
+def test_filtro_por_fecha_de_actualizacion(flt):
+    f = OrderFilter(flt.date_min, flt.date_max, date_field="updated_at")
+    params = f.filter_params()
+    assert params["updated_at_min"] == "2026-10-06T00:00:00+00:00"
+    assert "created_at_min" not in params
+
+
+def test_date_field_invalido(flt):
+    with pytest.raises(ValueError, match="date_field"):
+        OrderFilter(flt.date_min, flt.date_max, date_field="processed_at")
+
+
 def test_fields_siempre_incluye_id(flt):
-    f = OrderFilter(flt.created_at_min, flt.created_at_max, fields=("name", "total_price"))
+    f = OrderFilter(flt.date_min, flt.date_max, fields=("name", "total_price"))
     assert f.list_params()["fields"] == "id,name,total_price"
 
 
 def test_last_n_days():
     f = OrderFilter.last_n_days(7)
-    assert f.created_at_max - f.created_at_min == timedelta(days=7)
-    assert f.created_at_max.tzinfo is not None
+    assert f.date_max - f.date_min == timedelta(days=7)
+    assert f.date_max.tzinfo is not None
 
 
 @pytest.mark.parametrize(
@@ -39,7 +51,7 @@ def test_last_n_days():
 )
 def test_validaciones(flt, kwargs):
     with pytest.raises(ValueError):
-        OrderFilter(flt.created_at_min, flt.created_at_max, **kwargs)
+        OrderFilter(flt.date_min, flt.date_max, **kwargs)
 
 
 def test_rechaza_fechas_sin_zona_horaria():
