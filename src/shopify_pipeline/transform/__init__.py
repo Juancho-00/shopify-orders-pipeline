@@ -1,23 +1,8 @@
-"""Transformación de pedidos crudos de Shopify a líneas listas para Siesa."""
+"""
+Transformación: pedidos crudos de Shopify → reporte para Siesa.
 
-from shopify_pipeline.transform.siesa_lines import (
-    COLUMNS,
-    DEFAULT_ESTADOS_PAGO,
-    Evento,
-    PedidoTransformado,
-    SiesaLinesOptions,
-    TransformResult,
-    order_to_lines,
-    transform_orders,
-)
-
-__all__ = [
-    "COLUMNS",
-    "DEFAULT_ESTADOS_PAGO",
-    "Evento",
-    "PedidoTransformado",
-    "SiesaLinesOptions",
-    "TransformResult",
-    "order_to_lines",
-    "transform_orders",
-]
+    normalize.py    funciones pequeñas de limpieza (nombres, cédula/NIT, teléfono, fechas, montos)
+    siesa_lines.py  convierte un pedido en filas (productos + envío) y decide exclusiones
+    alertas.py      catálogo de alertas/exclusiones que van al log
+    run.py          lee el JSONL crudo y escribe CSV, Excel y log de alertas
+"""

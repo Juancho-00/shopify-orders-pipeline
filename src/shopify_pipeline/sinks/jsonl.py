@@ -1,4 +1,9 @@
-"""Sink a archivos JSON Lines con escritura atómica."""
+"""
+Escritura a JSON Lines (``.jsonl``): un objeto JSON por línea.
+
+Se usa para la zona cruda porque guarda cada pedido exactamente como lo entrega Shopify
+y se puede leer línea por línea sin cargar todo el archivo en memoria.
+"""
 
 from __future__ import annotations
 
@@ -28,13 +33,3 @@ def write_jsonl(records: Iterable[dict[str, Any]], path: Path) -> int:
         Path(tmp_name).unlink(missing_ok=True)
         raise
     return count
-
-
-class JsonlSink:
-    """Envoltorio de ``write_jsonl`` que cumple el protocolo ``Sink``."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-
-    def write(self, records: Iterable[dict[str, Any]]) -> int:
-        return write_jsonl(records, self.path)

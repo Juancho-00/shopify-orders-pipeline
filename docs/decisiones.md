@@ -73,3 +73,14 @@ Registro breve de decisiones de diseño y su motivo.
   incluido, sin transformación.
 - **Observación:** en el pedido #1006 Shopify no calculó IVA sobre el envío
   (`tax_lines` vacío). Pendiente confirmar si el envío debe llevar IVA.
+
+## 010 · Código más simple de leer (2026-10-14)
+
+- **Decisión:** reemplazar la librería `tenacity` por un ciclo `for` explícito de reintentos
+  (`client.py: _pedir_con_reintentos`), sacar la configuración de logs a `logs.py`, separar
+  el catálogo de alertas en `transform/alertas.py` y eliminar código sin uso
+  (`sinks/base.py`, `JsonlSink`, re-exportaciones en los `__init__.py`).
+- **Motivo:** facilitar la lectura y el mantenimiento. El comportamiento no cambió: las
+  mismas pruebas siguen pasando.
+- **Consecuencia:** una dependencia menos (`tenacity`). La guía `docs/guia_codigo.md`
+  explica cada archivo.

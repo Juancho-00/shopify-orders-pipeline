@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from shopify_pipeline.sinks import JsonlSink, write_jsonl
+from shopify_pipeline.sinks.jsonl import write_jsonl
 
 
 def test_write_jsonl(tmp_path):
@@ -23,8 +23,3 @@ def test_write_jsonl_atomico_no_deja_parcial(tmp_path):
         write_jsonl(gen(), out)
     assert not out.exists()
     assert list(tmp_path.iterdir()) == []
-
-
-def test_jsonl_sink(tmp_path):
-    sink = JsonlSink(tmp_path / "o.jsonl")
-    assert sink.write(iter([{"id": 1}])) == 1

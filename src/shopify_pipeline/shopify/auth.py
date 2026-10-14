@@ -1,18 +1,25 @@
 """
-Autenticación contra la Admin API de Shopify.
+Autenticación: de dónde sale el token que se envía en cada petición a Shopify.
 
-Dos modos:
+QUÉ HACE
+    Entrega el "pase de entrada" (access token) que el cliente HTTP pone en la cabecera
+    ``X-Shopify-Access-Token``. Hay dos formas de conseguirlo:
 
-* ``StaticTokenProvider``: token permanente ``shpat_...`` de una custom app *legacy*
-  (creada en el admin de Shopify antes del 1-ene-2026).
-* ``ClientCredentialsTokenProvider``: apps creadas en el Dev Dashboard. Intercambia
-  ``client_id`` + ``client_secret`` por un token que expira (~24 h) y lo renueva solo.
+    * ``StaticTokenProvider``: la app es *legacy* (creada en el admin antes de 2026) y
+      tiene un token permanente ``shpat_...``. Solo lo devuelve tal cual.
+    * ``ClientCredentialsTokenProvider``: la app se creó en el Dev Dashboard. Con
+      ``client_id`` + ``client_secret`` se pide un token a Shopify; ese token vence en
+      ~24 h, así que esta clase lo guarda y pide uno nuevo antes de que venza.
+
+POR QUÉ DOS CLASES CON LOS MISMOS MÉTODOS
+    El cliente HTTP no sabe (ni le importa) cuál de las dos está usando: solo llama
+    ``get_token()`` e ``invalidate()``. Así se puede cambiar el modo de autenticación
+    desde el ``.env`` sin tocar el resto del código.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from typing import Protocol
 
@@ -25,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 class TokenProvider(Protocol):
+    """Contrato: cualquier clase con estos dos métodos sirve como proveedor de token."""
+
     def get_token(self) -> str: ...
 
     def invalidate(self) -> bool:
@@ -50,10 +59,10 @@ class StaticTokenProvider:
 
 class ClientCredentialsTokenProvider:
     """
-    Client Credentials Grant (thread-safe).
+    Client Credentials Grant.
 
-    Renueva el token ``refresh_margin`` segundos antes de que expire, o cuando el
-    cliente lo invalida tras recibir un 401.
+    Renueva el token ``refresh_margin`` segundos (5 min) antes de que venza, o cuando
+    el cliente lo invalida tras recibir un 401.
     """
 
     def __init__(
@@ -72,19 +81,17 @@ class ClientCredentialsTokenProvider:
         self._margin = refresh_margin
         self._session = session or requests.Session()
         self._token: str | None = None
-        self._expires_at = 0.0
-        self._lock = threading.Lock()
+        self._expires_at = 0.0  # Momento (reloj interno) en que vence el token actual.
 
     def get_token(self) -> str:
-        with self._lock:
-            if self._token is None or time.monotonic() >= self._expires_at - self._margin:
-                self._fetch()
-            assert self._token is not None
-            return self._token
+        vencido = self._token is None or time.monotonic() >= self._expires_at - self._margin
+        if vencido:
+            self._fetch()
+        assert self._token is not None
+        return self._token
 
     def invalidate(self) -> bool:
-        with self._lock:
-            self._token = None
+        self._token = None  # La próxima llamada a get_token() pedirá uno nuevo.
         return True
 
     def _fetch(self) -> None:

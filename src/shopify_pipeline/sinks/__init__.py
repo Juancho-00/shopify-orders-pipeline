@@ -1,11 +1,9 @@
 """
-Destinos (sinks) de los datos extraídos.
+Escritura de archivos ("sinks" = destinos de los datos).
 
-Un sink recibe un iterable de registros y devuelve cuántos escribió. El extractor no
-sabe a dónde van los datos: para cambiar de destino basta con agregar un sink nuevo.
+    jsonl.py    JSON Lines (un pedido por línea) para la zona cruda
+    tabular.py  CSV (para sistemas) y Excel (para personas)
+
+Ambos escriben de forma atómica: primero a un archivo temporal y al final lo renombran,
+así nunca queda un archivo a medias si algo falla.
 """
-
-from shopify_pipeline.sinks.base import Sink
-from shopify_pipeline.sinks.jsonl import JsonlSink, write_jsonl
-
-__all__ = ["JsonlSink", "Sink", "write_jsonl"]

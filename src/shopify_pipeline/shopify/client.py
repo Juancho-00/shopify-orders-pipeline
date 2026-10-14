@@ -1,28 +1,34 @@
 """
 Cliente HTTP para la REST Admin API de Shopify.
 
-* Reintentos con ``tenacity``: 429 (respeta ``Retry-After``), 5xx, timeouts y errores de red.
-* Throttling proactivo con la cabecera ``X-Shopify-Shop-Api-Call-Limit`` (leaky bucket).
-* Paginación por cursor siguiendo la cabecera ``Link`` (rel="next").
-* Errores no recuperables (401/403/404/4xx) tipados y sin reintento.
+QUÉ HACE
+    Es el único archivo que "habla" con Shopify. Todos los demás le piden datos a él.
+
+RESPONSABILIDADES
+    1. Armar la URL y poner el token en cada petición.
+    2. Revisar la respuesta y convertir los errores HTTP en errores con nombre propio
+       (ver ``exceptions.py``).
+    3. Reintentar cuando el error es temporal (429, 5xx, caída de red).
+    4. Frenar a tiempo para no superar el límite de llamadas de Shopify.
+    5. Recorrer todas las páginas de un listado.
+
+EL LÍMITE DE LLAMADAS (leaky bucket o "balde con fuga")
+    Shopify le da a cada tienda un balde de 40 llamadas (400 en Shopify Plus). Cada
+    llamada echa una gota y el balde se vacía solo a 2 gotas por segundo (20 en Plus).
+    Si el balde se llena, Shopify responde 429 ("demasiadas peticiones").
+    Cada respuesta trae la cabecera ``X-Shopify-Shop-Api-Call-Limit: 36/40`` que dice
+    cuán lleno está. Si pasa del 80 %, esperamos a que baje al 50 % antes de seguir.
 """
 
 from __future__ import annotations
 
 import logging
+import random
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
 import requests
-from tenacity import (
-    RetryCallState,
-    Retrying,
-    before_sleep_log,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
 from shopify_pipeline import __version__
 from shopify_pipeline.config import ShopifyConfig
@@ -39,24 +45,32 @@ logger = logging.getLogger(__name__)
 
 USER_AGENT = f"shopify-pipeline/{__version__} (+data-engineering)"
 
-RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    ShopifyRetryableError,
-    requests.exceptions.ConnectionError,
-    requests.exceptions.Timeout,
-    requests.exceptions.ChunkedEncodingError,
+# Errores temporales: vale la pena esperar y volver a intentar.
+ERRORES_TEMPORALES: tuple[type[Exception], ...] = (
+    ShopifyRetryableError,  # 429 o 5xx
+    requests.exceptions.ConnectionError,  # sin conexión, DNS
+    requests.exceptions.Timeout,  # Shopify tardó demasiado
+    requests.exceptions.ChunkedEncodingError,  # respuesta cortada a la mitad
 )
 
+ESPERA_MAXIMA = 60.0  # segundos
 
-def _wait_strategy(retry_state: RetryCallState) -> float:
-    """Usa ``Retry-After`` si Shopify lo envía (429); si no, backoff exponencial con jitter."""
-    exc = retry_state.outcome.exception() if retry_state.outcome else None
-    if isinstance(exc, ShopifyRetryableError) and exc.retry_after is not None:
-        return exc.retry_after
-    return wait_random_exponential(multiplier=1, max=60)(retry_state)
+
+def segundos_de_espera(intento: int, error: Exception) -> float:
+    """
+    Cuánto esperar antes del siguiente intento.
+
+    * Si Shopify dijo cuánto esperar (cabecera ``Retry-After`` en un 429), se respeta.
+    * Si no, *backoff exponencial con jitter*: 1 s, 2 s, 4 s, 8 s... (máximo 60 s),
+      con un componente aleatorio para que varios procesos no reintenten al mismo tiempo.
+    """
+    if isinstance(error, ShopifyRetryableError) and error.retry_after is not None:
+        return error.retry_after
+    return random.uniform(0, min(2.0**intento, ESPERA_MAXIMA))
 
 
 class ShopifyClient:
-    """Cliente REST mínimo con reintentos, throttling y paginación."""
+    """Cliente REST mínimo con reintentos, control de límite y paginación."""
 
     def __init__(
         self,
@@ -65,106 +79,133 @@ class ShopifyClient:
         session: requests.Session | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        """
+        ``token_provider``, ``session`` y ``sleep`` son opcionales: en producción se usan
+        los valores por defecto; las pruebas pasan versiones falsas (por ejemplo, un
+        ``sleep`` que no duerme) para correr en milisegundos.
+        """
         self.config = config
         self.token_provider = token_provider or build_token_provider(config)
         self.base_url = f"https://{config.shop_domain}/admin/api/{config.api_version}"
         self._sleep = sleep
+        # Una sesión reutiliza la conexión entre llamadas: más rápido que abrir una por petición.
         self.session = session or requests.Session()
         self.session.headers.update({"Accept": "application/json", "User-Agent": USER_AGENT})
-        self._retrying = Retrying(
-            retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
-            wait=_wait_strategy,
-            stop=stop_after_attempt(config.max_attempts),
-            before_sleep=before_sleep_log(logger, logging.WARNING),
-            sleep=sleep,
-            reraise=True,
-        )
 
-    # ------------------------------------------------------------- throttling
-    def _throttle(self, response: requests.Response) -> None:
-        """
-        Leaky bucket proactivo. Cabecera: ``X-Shopify-Shop-Api-Call-Limit: 32/40``.
-
-        Tasa de fuga ≈ capacidad/20 por segundo (40 → 2 req/s estándar; 400 → 20 req/s Plus).
-        Si el bucket supera el umbral, espera hasta que drene a ~50 %.
-        """
-        header = response.headers.get("X-Shopify-Shop-Api-Call-Limit")
+    # ---------------------------------------------------------- límite de llamadas
+    def _frenar_si_el_balde_esta_lleno(self, response: requests.Response) -> None:
+        header = response.headers.get("X-Shopify-Shop-Api-Call-Limit")  # p. ej. "36/40"
         if not header:
             return
         try:
-            used, capacity = (int(x) for x in header.split("/"))
+            usadas, capacidad = (int(x) for x in header.split("/"))
         except ValueError:
             return
-        if capacity <= 0 or used / capacity < self.config.throttle_threshold:
+        if capacidad <= 0 or usadas / capacidad < self.config.throttle_threshold:
             return
-        leak_rate = max(capacity / 20.0, 1.0)
-        pause = (used - capacity * 0.5) / leak_rate
-        logger.debug("Bucket en %s; pausa proactiva de %.1fs", header, pause)
-        self._sleep(pause)
+        vaciado_por_segundo = max(capacidad / 20.0, 1.0)  # 40 → 2/s; 400 → 20/s
+        pausa = (usadas - capacidad * 0.5) / vaciado_por_segundo
+        logger.debug("Balde en %s; pausa preventiva de %.1fs", header, pausa)
+        self._sleep(pausa)
 
-    # --------------------------------------------------------------- requests
-    def _send_once(self, url: str, params: dict[str, Any] | None) -> requests.Response:
+    # ----------------------------------------------------------- una sola petición
+    def _pedir_una_vez(self, url: str, params: dict[str, Any] | None) -> requests.Response:
+        """Hace UNA petición y traduce el código HTTP a éxito o a un error con nombre."""
         headers = {"X-Shopify-Access-Token": self.token_provider.get_token()}
         resp = self.session.get(url, params=params, headers=headers, timeout=self.config.timeout)
         status = resp.status_code
 
         if status == 200:
-            self._throttle(resp)
+            self._frenar_si_el_balde_esta_lleno(resp)
             return resp
 
+        # X-Request-Id identifica la petición si hay que escribirle a soporte de Shopify.
         request_id = resp.headers.get("X-Request-Id", "n/d")
         path = resp.request.path_url if resp.request is not None else url
-        detail = f"HTTP {status} en {path} (X-Request-Id={request_id})"
+        detalle = f"HTTP {status} en {path} (X-Request-Id={request_id})"
 
         if status == 429:
             retry_after = float(resp.headers.get("Retry-After", 2.0))
-            raise ShopifyRetryableError(f"Rate limit: {detail}", retry_after=retry_after)
+            raise ShopifyRetryableError(f"Límite de llamadas: {detalle}", retry_after=retry_after)
         if status >= 500:
-            raise ShopifyRetryableError(f"Error del servidor: {detail}")
+            raise ShopifyRetryableError(f"Error del servidor: {detalle}")
         if status == 401:
-            raise ShopifyAuthError(f"No autorizado: {detail}. Token inválido, revocado o expirado.")
+            raise ShopifyAuthError(f"No autorizado: {detalle}. Token inválido, revocado o expirado.")
         if status == 403:
             raise ShopifyPermissionError(
-                f"Prohibido: {detail}. Verifique el scope 'read_orders' "
+                f"Prohibido: {detalle}. Verifique el scope 'read_orders' "
                 "(y 'read_all_orders' para pedidos de más de 60 días)."
             )
         if status == 404:
             raise ShopifyNotFoundError(
-                f"No encontrado: {detail}. Revise el dominio *.myshopify.com y la versión de API."
+                f"No encontrado: {detalle}. Revise el dominio *.myshopify.com y la versión de API."
             )
-        raise ShopifyClientError(f"{detail}: {resp.text[:500]}")
+        raise ShopifyClientError(f"{detalle}: {resp.text[:500]}")
 
-    def _url(self, path_or_url: str) -> str:
-        if path_or_url.startswith("https://"):
-            return path_or_url
-        return f"{self.base_url}/{path_or_url.lstrip('/')}"
+    # ------------------------------------------------------------ con reintentos
+    def _pedir_con_reintentos(self, url: str, params: dict[str, Any] | None) -> requests.Response:
+        """
+        Llama a ``_pedir_una_vez`` hasta ``max_attempts`` veces si el error es temporal.
+        Los errores definitivos (401, 403, 404...) salen de inmediato: reintentarlos no
+        los arregla y solo gasta llamadas.
+        """
+        intentos = self.config.max_attempts
+        for intento in range(1, intentos + 1):
+            try:
+                return self._pedir_una_vez(url, params)
+            except ERRORES_TEMPORALES as error:
+                if intento == intentos:
+                    raise  # Se acabaron los intentos: el error sube a quien llamó.
+                espera = segundos_de_espera(intento, error)
+                logger.warning(
+                    "Intento %d de %d falló (%s). Reintentando en %.1fs.", intento, intentos, error, espera
+                )
+                self._sleep(espera)
+        raise AssertionError("inalcanzable")  # pragma: no cover
 
     def get(self, path_or_url: str, params: dict[str, Any] | None = None) -> requests.Response:
-        """GET con reintentos. Ante un 401 renueva el token una sola vez (si el modo lo permite)."""
-        url = self._url(path_or_url)
-        try:
-            return self._retrying.copy()(self._send_once, url, params)
-        except ShopifyAuthError:
-            if self.token_provider.invalidate():
-                logger.warning("401 recibido; renovando token y reintentando una vez.")
-                return self._retrying.copy()(self._send_once, url, params)
-            raise
+        """
+        Punto de entrada para pedir algo a Shopify.
 
+        Acepta una ruta relativa (``"orders.json"``) o una URL completa (la de la página
+        siguiente). Si Shopify responde 401 y el token se puede renovar (modo Client
+        Credentials), pide un token nuevo y reintenta una sola vez.
+        """
+        url = (
+            path_or_url
+            if path_or_url.startswith("https://")
+            else f"{self.base_url}/{path_or_url.lstrip('/')}"
+        )
+        try:
+            return self._pedir_con_reintentos(url, params)
+        except ShopifyAuthError:
+            if not self.token_provider.invalidate():
+                raise
+            logger.warning("401 recibido; renovando token y reintentando una vez.")
+            return self._pedir_con_reintentos(url, params)
+
+    # ------------------------------------------------------------------ páginas
     def paginate(self, path: str, params: dict[str, Any]) -> Iterator[requests.Response]:
         """
-        Recorre todas las páginas siguiendo ``Link: <...page_info=...>; rel="next"``.
+        Recorre todas las páginas de un listado, una por una.
 
-        La URL "next" ya trae ``page_info`` y ``limit``. Shopify rechaza otros filtros
-        junto a ``page_info``, por eso NO se reenvían los params originales: los filtros
-        quedan "congelados" dentro del cursor.
+        Shopify entrega máximo 250 pedidos por página. Al final de cada respuesta agrega
+        la cabecera ``Link`` con la URL de la página siguiente (``rel="next"``). Cuando
+        ya no hay ``next``, se terminó.
+
+        Ojo: la URL "next" ya trae los filtros codificados en ``page_info``. Si se
+        vuelven a enviar los filtros, Shopify responde error; por eso desde la segunda
+        página ``params`` va vacío.
+
+        ``yield`` entrega una página a la vez (no las acumula todas en memoria).
         """
         url: str | None = path
-        current_params: dict[str, Any] | None = params
-        page = 0
+        params_actuales: dict[str, Any] | None = params
+        pagina = 0
         while url:
-            resp = self.get(url, current_params)
-            page += 1
-            logger.debug("Página %d descargada", page)
+            resp = self.get(url, params_actuales)
+            pagina += 1
+            logger.debug("Página %d descargada", pagina)
             yield resp
-            url = resp.links.get("next", {}).get("url")
-            current_params = None
+            url = resp.links.get("next", {}).get("url")  # requests ya interpreta la cabecera Link
+            params_actuales = None

@@ -4,8 +4,9 @@ import json
 import pytest
 from openpyxl import load_workbook
 
+from shopify_pipeline.transform.alertas import EVENT_COLUMNS
 from shopify_pipeline.transform.run import latest_raw_file, read_jsonl, run_transform
-from shopify_pipeline.transform.siesa_lines import COLUMNS, EVENT_COLUMNS
+from shopify_pipeline.transform.siesa_lines import COLUMNS
 from tests.conftest import FIXTURES
 
 

@@ -1,5 +1,15 @@
 """
-Línea de comandos del pipeline.
+Línea de comandos: lo que se ejecuta al escribir ``shopify-pipeline ...`` en la terminal.
+
+QUÉ HACE
+    1. Lee los argumentos (``--days``, ``--since``, ``--codigo-envio``...).
+    2. Carga el ``.env`` y configura los logs.
+    3. Llama al orquestador que corresponda (``extract`` o ``transform``).
+    4. Convierte cualquier error en un código de salida (0, 1, 2 o 3) para que una tarea
+       programada sepa si la corrida salió bien.
+
+    Este archivo NO contiene lógica de negocio: solo traduce lo que escribe el usuario a
+    llamadas a ``extract.py`` y ``transform/run.py``.
 
     shopify-pipeline extract --days 7
     shopify-pipeline extract --since 2026-10-01 --until 2026-10-08 --status any
@@ -32,6 +42,7 @@ from shopify_pipeline import __version__
 from shopify_pipeline.config import ShopifyConfig, load_env_file
 from shopify_pipeline.exceptions import CONFIGURATION_ERRORS, ShopifyError
 from shopify_pipeline.extract import DEFAULT_OUTPUT_DIR, run_extraction
+from shopify_pipeline.logs import setup_logging
 from shopify_pipeline.shopify.client import ShopifyClient
 from shopify_pipeline.shopify.orders import VALID_STATUSES, OrderFilter
 from shopify_pipeline.transform.run import (
@@ -46,7 +57,6 @@ logger = logging.getLogger("shopify_pipeline")
 
 EXIT_OK, EXIT_TRANSIENT, EXIT_CONFIG, EXIT_UNRECONCILED = 0, 1, 2, 3
 
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s | %(message)s"
 DATE_FIELDS = {"creacion": "created_at", "actualizacion": "updated_at"}
 
 
@@ -180,38 +190,19 @@ def _cmd_transform(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def setup_logging(level: str, log_dir: Path | None) -> Path | None:
-    """
-    Consola + archivo diario ``shopify_pipeline_AAAAMMDD.log`` (se agrega al final).
-    Devuelve la ruta del archivo de log.
-    """
-    logging.basicConfig(level=level.upper(), format=LOG_FORMAT)
-    pkg = logging.getLogger("shopify_pipeline")
-    pkg.setLevel(level.upper())
-    for handler in [h for h in pkg.handlers if getattr(h, "_shopify_pipeline", False)]:
-        pkg.removeHandler(handler)
-        handler.close()
-    if log_dir is None:
-        return None
-    log_dir.mkdir(parents=True, exist_ok=True)
-    path = log_dir / f"shopify_pipeline_{date.today():%Y%m%d}.log"
-    handler = logging.FileHandler(path, encoding="utf-8")
-    handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    handler._shopify_pipeline = True  # type: ignore[attr-defined]
-    pkg.addHandler(handler)
-    return path
-
-
 def main(argv: list[str] | None = None) -> int:
-    # El .env se carga antes de leer los argumentos para que SIESA_CODIGO_ENVIO aplique.
+    # Paso 1: cargar el .env ANTES de leer los argumentos, porque el valor por defecto de
+    # --codigo-envio sale de la variable SIESA_CODIGO_ENVIO definida en el .env.
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--env-file", type=Path, default=None)
     load_env_file(pre.parse_known_args(argv)[0].env_file)
 
+    # Paso 2: leer todos los argumentos y preparar los logs.
     args = build_parser().parse_args(argv)
     setup_logging(args.log_level, args.log_dir)
     logger.info("Inicio: shopify-pipeline %s %s", __version__, args.command)
 
+    # Paso 3: ejecutar el comando. Paso 4: traducir errores a códigos de salida.
     try:
         if args.command == "extract":
             return _cmd_extract(args)

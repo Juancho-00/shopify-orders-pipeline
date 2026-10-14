@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 
 from shopify_pipeline.sinks.tabular import write_csv, write_xlsx
+from shopify_pipeline.transform.alertas import EVENT_COLUMNS
 from shopify_pipeline.transform.siesa_lines import (
     COLUMNS,
-    EVENT_COLUMNS,
     NUMERIC_COLUMNS,
     SiesaLinesOptions,
     TransformResult,

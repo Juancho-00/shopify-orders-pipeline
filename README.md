@@ -22,9 +22,13 @@ Shopify ────────────────────────
 
 ## Estructura del repositorio
 
+> ¿Primera vez leyendo el código? Empieza por [`docs/guia_codigo.md`](docs/guia_codigo.md).
+
 ```
 shopify-orders-pipeline/
 ├── src/shopify_pipeline/
+│   ├── cli.py               # Comando `shopify-pipeline` (extract, transform) y códigos de salida
+│   ├── logs.py              # Bitácora: consola + archivo diario
 │   ├── config.py            # Configuración desde variables de entorno / .env
 │   ├── exceptions.py        # Jerarquía de errores (auth, permisos, transitorios...)
 │   ├── shopify/
@@ -34,21 +38,21 @@ shopify-orders-pipeline/
 │   │   └── fulfillment.py   # Bodega de salida de cada línea (fulfillment orders)
 │   ├── transform/
 │   │   ├── normalize.py     # Nombres, apellidos, cédula/NIT, teléfono, fechas, montos
-│   │   ├── siesa_lines.py   # Pedido → filas para Siesa (productos + envío) + alertas/exclusiones
+│   │   ├── siesa_lines.py   # Pedido → filas para Siesa (productos + envío) y exclusiones
+│   │   ├── alertas.py       # Catálogo de alertas y exclusiones del log
 │   │   └── run.py           # JSONL crudo → CSV + Excel + log de alertas
 │   ├── sinks/
-│   │   ├── base.py          # Contrato Sink
 │   │   ├── jsonl.py         # Escritura atómica a JSON Lines
 │   │   └── tabular.py       # CSV y Excel
 │   ├── extract.py           # Orquestación de la extracción + manifiesto de la corrida
 │   ├── reconciliation/      # Fase 2 (pendiente)
-│   ├── erp/                 # Fase 3 (pendiente)
-│   └── cli.py               # Comando `shopify-pipeline`
+│   └── erp/                 # Fase 3 (pendiente)
 ├── tests/                   # Pruebas sin red (Shopify simulado con `responses`)
 │   └── fixtures/            # Respuestas de ejemplo de Shopify (anonimizadas)
 ├── templates/erp/           # Plantillas de carga del ERP (fase 3; no se versionan)
 ├── data/                    # Salidas locales (no se versionan: datos personales)
 ├── docs/
+│   ├── guia_codigo.md       # Para qué sirve cada archivo .py, explicado paso a paso
 │   ├── mapeo_siesa.md       # Origen y regla de cada columna del reporte (para el ticket de Siesa)
 │   └── decisiones.md        # Decisiones técnicas y su motivo
 ├── .github/workflows/ci.yml # Lint + pruebas en cada push / PR
@@ -276,7 +280,7 @@ evitará cargarlo dos veces en Siesa.
 - **Rate limiting (leaky bucket):**
   - *Proactivo:* lee `X-Shopify-Shop-Api-Call-Limit` (p. ej. `36/40`); si el bucket pasa del 80 %, pausa hasta que drene al 50 %.
   - *Reactivo:* ante `429`, espera lo que indique `Retry-After` y reintenta.
-- **Reintentos:** 5xx, timeouts y errores de red, con backoff exponencial y jitter (máx. 6 intentos).
+- **Reintentos:** 5xx, timeouts y errores de red, con espera creciente y aleatoria (máx. 6 intentos).
 - **Sin reintento:** 401 (salvo una renovación de token en modo Client Credentials), 403, 404 y demás 4xx.
 - **Filtros:** `status=any` (Shopify usa `open` por defecto y omitiría cerrados y cancelados),
   ventana cerrada fijada al iniciar la corrida sobre `created_at` o `updated_at`

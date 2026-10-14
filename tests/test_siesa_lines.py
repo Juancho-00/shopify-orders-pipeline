@@ -7,10 +7,9 @@ from decimal import Decimal
 import pytest
 
 from shopify_pipeline.shopify.fulfillment import FULFILLMENT_KEY, _slim
+from shopify_pipeline.transform.alertas import DESCRIPCIONES, EVENT_COLUMNS
 from shopify_pipeline.transform.siesa_lines import (
     COLUMNS,
-    DESCRIPCIONES,
-    EVENT_COLUMNS,
     SiesaLinesOptions,
     order_to_lines,
     transform_orders,

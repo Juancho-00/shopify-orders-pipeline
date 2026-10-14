@@ -1,21 +1,8 @@
-"""Fase 1: cliente y extracción de datos desde la Admin API de Shopify."""
+"""
+Todo lo que habla con la API de Shopify.
 
-from shopify_pipeline.shopify.auth import (
-    ClientCredentialsTokenProvider,
-    StaticTokenProvider,
-    TokenProvider,
-    build_token_provider,
-)
-from shopify_pipeline.shopify.client import ShopifyClient
-from shopify_pipeline.shopify.orders import OrderFilter, count_orders, extract_orders
-
-__all__ = [
-    "ClientCredentialsTokenProvider",
-    "OrderFilter",
-    "ShopifyClient",
-    "StaticTokenProvider",
-    "TokenProvider",
-    "build_token_provider",
-    "count_orders",
-    "extract_orders",
-]
+    auth.py         de dónde sale el token (estático o Client Credentials)
+    client.py       peticiones HTTP: errores, reintentos, límite de llamadas, paginación
+    orders.py       filtros de pedidos (ventana de fechas, estado) y descarga de pedidos
+    fulfillment.py  bodega de salida de cada producto (una consulta extra por pedido)
+"""
