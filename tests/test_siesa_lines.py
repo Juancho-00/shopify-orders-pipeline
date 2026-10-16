@@ -170,6 +170,17 @@ def test_descuentos_y_multiples_unidades(order):
     assert row["valor_total_linea"] == Decimal("169998.00")
 
 
+def test_reembolso_parcial_prorratea_el_descuento(order):
+    """2 unidades con $10.000 de descuento; se reembolsa 1 → queda $5.000 de descuento."""
+    item = order["line_items"][0]
+    item["quantity"], item["current_quantity"] = 2, 1
+    item["discount_allocations"] = [{"amount": "10000.00"}]
+    row = rows(order)[0]
+    assert row["cantidad"] == 1
+    assert row["descuento_linea"] == Decimal("5000.00")
+    assert row["valor_total_linea"] == Decimal("84999.00")
+
+
 def test_linea_eliminada_se_omite(order):
     order["line_items"][0]["current_quantity"] = 0
     assert [r["tipo_linea"] for r in rows(order)] == ["ENVIO"]
@@ -261,3 +272,79 @@ def test_exclusiones_cancelados_y_pruebas(paid_order):
     assert todo.pedidos_procesados == 3
     assert [e.codigo for e in todo.alertas] == ["PEDIDO_CANCELADO"]
     assert todo.pedidos_con_alertas == 1
+
+
+# ------------------------------------------------- aislamiento y contrato
+def test_pedido_con_dato_malo_no_detiene_el_lote(paid_order):
+    malo = copy.deepcopy(paid_order)
+    malo["id"], malo["name"] = 99, "#9999"
+    malo["line_items"][0]["price"] = "no-es-un-monto"
+
+    result = transform_orders([malo, paid_order])
+
+    assert result.pedidos_procesados == 1
+    assert result.errores == 1
+    (error,) = [e for e in result.eventos if e.codigo == "ERROR_TRANSFORMACION"]
+    assert error.pedido_shopify == "#9999"
+    assert "Monto inválido" in error.detalle
+    assert {r["pedido_shopify"] for r in result.rows} == {"#1006"}
+
+
+def test_pedido_sin_campo_test_no_pasa_en_silencio(paid_order):
+    """Sin la clave ``test`` (extracción con --fields) un pedido de prueba pasaría al reporte."""
+    proyectado = copy.deepcopy(paid_order)
+    del proyectado["test"]
+
+    result = transform_orders([proyectado])
+
+    assert result.rows == []
+    assert result.pedidos_excluidos == {"DATOS_INCOMPLETOS": 1}
+    assert "test" in result.eventos[0].detalle
+
+
+# ------------------------------------------------------------------- ledger
+def test_ledger_excluye_pedidos_ya_reportados(paid_order, tmp_path):
+    from shopify_pipeline.state import Ledger
+
+    ledger = Ledger(tmp_path / "reportados.json")
+    primera = transform_orders([paid_order], ledger=ledger, run_id="RUN1")
+    assert primera.reportados == [(paid_order["id"], "102293.34")]
+    ledger.marcar(paid_order["id"], "102293.34", "RUN1")
+
+    # La ventana siguiente se solapa: el mismo pedido llega otra vez.
+    segunda = transform_orders([paid_order], ledger=ledger, run_id="RUN2")
+    assert segunda.rows == []
+    assert [(e.codigo, e.detalle) for e in segunda.eventos] == [("YA_REPORTADO", "run=RUN1")]
+
+    # Regenerar el reporte de la misma corrida (comando transform) no lo excluye.
+    regenerado = transform_orders([paid_order], ledger=ledger, run_id="RUN1")
+    assert regenerado.pedidos_procesados == 1
+
+
+def test_ledger_detecta_cambio_despues_de_reportado(paid_order, tmp_path):
+    from shopify_pipeline.state import Ledger
+
+    ledger = Ledger(tmp_path / "reportados.json")
+    ledger.marcar(paid_order["id"], "102293.34", "RUN1")
+    paid_order["current_total_price"] = "89999.00"  # p. ej. reembolso del envío
+
+    result = transform_orders([paid_order], ledger=ledger, run_id="RUN2")
+
+    assert result.rows == []
+    (evento,) = result.eventos
+    assert evento.codigo == "CAMBIO_POST_REPORTE"
+    assert evento.detalle == "total 102293.34 → 89999.00 (run=RUN1)"
+
+
+def test_va_al_reporte(paid_order, order, tmp_path):
+    from shopify_pipeline.state import Ledger
+    from shopify_pipeline.transform.siesa_lines import va_al_reporte
+
+    opciones = SiesaLinesOptions()
+    assert va_al_reporte(paid_order, opciones)
+    assert not va_al_reporte(order | {"financial_status": "pending"}, opciones)
+    ledger = Ledger(tmp_path / "r.json")
+    ledger.marcar(paid_order["id"], "1.00", "RUN1")
+    assert not va_al_reporte(paid_order, opciones, ledger)
+    sin_test = {k: v for k, v in paid_order.items() if k != "test"}
+    assert va_al_reporte(sin_test, opciones)  # Ante la duda, se consulta

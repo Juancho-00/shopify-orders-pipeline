@@ -4,6 +4,8 @@ import json
 import pytest
 from openpyxl import load_workbook
 
+from shopify_pipeline.exceptions import DataError
+from shopify_pipeline.state import Ledger
 from shopify_pipeline.transform.alertas import EVENT_COLUMNS
 from shopify_pipeline.transform.run import latest_raw_file, read_jsonl, run_transform
 from shopify_pipeline.transform.siesa_lines import COLUMNS
@@ -82,5 +84,41 @@ def test_latest_raw_file_vacio(tmp_path):
 def test_read_jsonl_reporta_linea_invalida(tmp_path):
     path = tmp_path / "x.jsonl"
     path.write_text('{"id": 1}\n{malo\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="línea 2"):
+    with pytest.raises(DataError, match="línea 2"):
         list(read_jsonl(path))
+
+
+def _manifest(raw_file, **campos):
+    data = {"schema_version": 2, "reconciled": True, "fields": None} | campos
+    raw_file.with_name(f"{raw_file.stem}.manifest.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_manifiesto_con_fields_incompletos_detiene_la_transformacion(raw_file, tmp_path):
+    _manifest(raw_file, fields=["id", "name", "financial_status", "line_items"])
+    with pytest.raises(DataError, match="--fields"):
+        run_transform(raw_file, tmp_path / "out", log_dir=tmp_path / "logs")
+    assert not (tmp_path / "out").exists()  # No se generó un reporte incompleto
+
+
+def test_manifiesto_sin_cuadrar_se_reporta(raw_file, tmp_path, caplog):
+    _manifest(raw_file, reconciled=False, expected_count=3, written_count=2)
+    run = run_transform(raw_file, tmp_path / "out", log_dir=tmp_path / "logs")
+    assert not run.reconciled
+    assert "no cuadró" in caplog.text
+
+
+def test_manifiesto_de_version_futura(raw_file, tmp_path):
+    _manifest(raw_file, schema_version=99)
+    with pytest.raises(DataError, match="schema_version"):
+        run_transform(raw_file, tmp_path / "out", log_dir=tmp_path / "logs")
+
+
+def test_ledger_se_actualiza_despues_de_escribir(raw_file, tmp_path):
+    ledger = Ledger.open(tmp_path / "state")
+    run_transform(raw_file, tmp_path / "out", log_dir=tmp_path / "logs", ledger=ledger)
+
+    reabierto = Ledger.open(tmp_path / "state")
+    assert len(reabierto) == 1  # Solo el #1006 (pagado); el #1007 pendiente no se registra
+    assert reabierto.get(json.loads(raw_file.read_text(encoding="utf-8").splitlines()[0])["id"]).run_id == (
+        raw_file.stem
+    )

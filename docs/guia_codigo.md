@@ -63,6 +63,7 @@ src/shopify_pipeline/
 ├── config.py            Lee el .env y valida dominio y credenciales
 ├── exceptions.py        Los tipos de error con nombre propio
 ├── extract.py           Orquesta la extracción: contar → descargar → guardar → manifiesto
+├── state.py             Memoria entre corridas: watermark y pedidos ya reportados
 ├── shopify/             TODO lo que habla con Shopify
 │   ├── auth.py          De dónde sale el token
 │   ├── client.py        Peticiones HTTP: errores, reintentos, límite, páginas
@@ -74,6 +75,7 @@ src/shopify_pipeline/
 │   ├── alertas.py       Catálogo de alertas y exclusiones del log
 │   └── run.py           Orquesta la transformación: leer JSONL → escribir reporte
 ├── sinks/               Escritura de archivos
+│   ├── atomic.py        Escritura atómica compartida (temporal + renombrar)
 │   ├── jsonl.py         JSON Lines (zona cruda)
 │   └── tabular.py       CSV y Excel
 ├── reconciliation/      Fase 2 (vacía por ahora)
@@ -104,17 +106,22 @@ No contiene reglas de negocio.
 | Función           | Qué hace                                                                                                                                                                 |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `build_parser`   | Define los comandos (`extract`, `transform`) y sus opciones (`--days`, `--since`, `--codigo-envio`...). La librería `argparse` genera la ayuda de `--help` |
-| `build_filter`   | Convierte`--days`, `--since`/`--until` y `--filtrar-por` en un `OrderFilter`                                                                                    |
-| `_parse_date`    | Acepta`2026-10-01` o `2026-10-01T08:00:00-05:00` y lo convierte en fecha                                                                                              |
+| `build_filter`   | Convierte`--days`, `--since`/`--until`, `--incremental` y `--filtrar-por` en un `OrderFilter`                                                                   |
+| `_parse_fields`  | Lee`--fields` y, si se va a generar el reporte, agrega los campos que este necesita (`CAMPOS_REQUERIDOS`)                                                      |
+| `_parse_date`    | Acepta`2026-10-01` (medianoche en hora Colombia) o `2026-10-01T08:00:00-05:00` y lo convierte en fecha                                                               |
+| `_filtro_bodega` | Decide qué pedidos merecen la llamada de bodega: solo los que van al reporte (`va_al_reporte`), salvo `--bodega-todos` o `--solo-raw`                           |
 | `_parse_estados` | Convierte`"paid,partially_refunded"` en un conjunto; `"todos"` = sin filtro                                                                                           |
 | `_siesa_options` | Agrupa las opciones del reporte Siesa en un`SiesaLinesOptions`                                                                                                          |
-| `_cmd_extract`   | Ejecuta la extracción y, si no se pidió`--solo-raw`, la transformación                                                                                               |
+| `_cmd_extract`   | Ejecuta la extracción, la transformación (salvo`--solo-raw`) y, en modo incremental, avanza el watermark si la extracción cuadró                                 |
+| `_codigo_strict` | Con`--strict`: `3` si el conteo no cuadró, `4` si hubo pedidos que no se pudieron transformar                                                                       |
 | `_cmd_transform` | Rehace el reporte desde un JSONL ya guardado                                                                                                                              |
 | `main`           | Carga el`.env`, lee argumentos, configura logs, ejecuta el comando y traduce errores a códigos                                                                         |
 
-**Códigos de salida:** `0` bien · `1` error temporal (red, Shopify caído) · `2` error de
-configuración (token, permisos, `.env`) · `3` el conteo no cuadró (solo con `--strict`).
-Sirven para que una tarea programada sepa si debe avisar.
+**Códigos de salida:** `0` bien · `1` error temporal (red, Shopify caído, archivo bloqueado) ·
+`2` error de configuración (token, permisos, `.env`, argumentos) · `3` el conteo no cuadró
+(solo con `--strict`) · `4` error de datos (archivo dañado, campos faltantes, pedidos que no
+se pudieron transformar con `--strict`) · `5` error inesperado (bug). Sirven para que una
+tarea programada sepa si debe reintentar (`1`) o avisar a una persona (los demás).
 
 ### `logs.py` — la bitácora
 
@@ -143,6 +150,8 @@ heredan esa configuración.
 
 ```
 PipelineError
+├── ConfigError                 .env, argumentos o carpeta vacía → código 2
+├── DataError                   archivo dañado o datos insuficientes → código 4
 └── ShopifyError
     ├── ShopifyAuthError        401  token malo o vencido      → intentar renovar el token
     ├── ShopifyPermissionError  403  falta un permiso (scope)  → no reintentar
@@ -152,7 +161,9 @@ PipelineError
 ```
 
 `CONFIGURATION_ERRORS` agrupa los que significan "corrige la configuración"; `cli.py` los usa
-para devolver el código `2`.
+para devolver el código `2`. Un `ValueError` cualquiera **no** cuenta como error de
+configuración: casi siempre es un dato malo o un bug, y confundirlos hacía que la tarea
+programada diera una instrucción equivocada.
 
 ### `extract.py` — el coordinador de la extracción
 
@@ -160,9 +171,13 @@ para devolver el código `2`.
 
 | Elemento             | Qué hace                                                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `run_extraction`   | Cuenta los pedidos → descarga → agrega bodegas → guarda JSONL → escribe manifiesto → avisa si el conteo no cuadra           |
+| `run_extraction`   | Cuenta los pedidos → descarga → agrega bodegas → guarda JSONL → si no cuadra, cuenta otra vez (`recount_count`) → escribe manifiesto |
 | `ExtractionResult` | El resumen de la corrida (ventana, conteos, duración).`reconciled` dice si lo descargado coincide con lo que reportó Shopify |
 | `new_run_id`       | Crea el identificador de la corrida a partir de la hora UTC:`20261014T150000Z`. Así los archivos quedan ordenados por fecha   |
+
+**La zona raw es inmutable:** si ya existe un JSONL con el mismo `run_id`, la extracción se
+niega a sobrescribirlo. El manifiesto registra además `fields` (si se pidieron solo algunos
+campos), `incremental` y `schema_version`: es el contrato que `transform` valida.
 
 **Dato clave:** la descarga y la escritura van "encadenadas". Un pedido sale de Shopify, se le
 agrega la bodega y se escribe al archivo antes de pedir el siguiente. Por eso la memoria no
@@ -225,7 +240,7 @@ información en las *fulfillment orders* (grupos de productos asignados a una ub
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `fetch_fulfillment_orders` | Consulta`orders/{id}/fulfillment_orders.json` (una llamada por pedido)                                                                               |
 | `_slim`                    | Se queda solo con lo útil: bodega, líneas y cantidades                                                                                               |
-| `BodegaEnricher`           | Agrega la bodega a cada pedido con la clave`_fulfillment_orders`. Si falta el permiso (403), avisa una vez y sigue sin bodega en vez de detener todo |
+| `BodegaEnricher`           | Agrega la bodega a cada pedido con la clave`_fulfillment_orders`. Con `debe_consultar` se salta los pedidos que no van al reporte (`omitidos`). Si falta el permiso (403), avisa una vez y sigue sin bodega; si un pedido da 404, sigue con el siguiente |
 | `location_by_line_item`    | Arma el diccionario`{línea del pedido: (id_bodega, nombre_bodega)}` que usa la transformación                                                      |
 
 ### `transform/normalize.py` — las funciones de limpieza
@@ -257,8 +272,11 @@ producto, más una de envío) y decidir qué pedidos no pasan.
 | `COLUMNS`                                       | Lista y orden de las columnas del reporte                                                           |
 | `DEFAULT_ESTADOS_PAGO`                          | Qué cuenta como pago confirmado:`paid`, `partially_refunded`                                   |
 | `SiesaLinesOptions`                             | Opciones: código del envío, estados de pago, incluir cancelados o de prueba                       |
-| `transform_orders`                              | Recorre todos los pedidos: si uno se excluye, lo anota en el log; si no, lo convierte               |
+| `CAMPOS_REQUERIDOS` / `CLAVES_CRITICAS`       | Campos que necesita la transformación / los que, si faltan, harían fallar los filtros en silencio |
+| `transform_orders`                              | Recorre todos los pedidos **aislando cada uno**: si uno falla, queda como `ERROR_TRANSFORMACION` y los demás siguen |
+| `validar_contrato`                              | ¿Trae el pedido las claves críticas (`test`, `cancelled_at`, `financial_status`...)? Si no, `DATOS_INCOMPLETOS` |
 | `_motivo_exclusion`                             | ¿Es de prueba? ¿Está cancelado? ¿El pago no está confirmado?                                   |
+| `_motivo_ledger`                                | ¿Ya salió en el reporte de otra corrida? (`YA_REPORTADO` o, si su total cambió, `CAMBIO_POST_REPORTE`) |
 | `order_to_lines`                                | Convierte un pedido: datos del cliente + una fila por producto + fila de envío si cuesta más de 0 |
 | `_cliente`                                      | Arma los datos del cliente (nombre, cédula, dirección, teléfono, email) y sus alertas            |
 | `_diferencia_total`                             | Control: ¿la suma de las filas = total del pedido en Shopify?                                      |
@@ -285,19 +303,40 @@ el log de alertas.
 
 - `read_jsonl`: lee el archivo crudo línea por línea. Si una línea está dañada, indica cuál.
 - `latest_raw_file`: busca la extracción más reciente (por eso el `run_id` es ordenable).
-- `run_transform`: transforma → escribe CSV, Excel y `alertas_<run_id>.csv` → resume en la bitácora.
+- `read_manifest`: lee el manifiesto de la extracción; se detiene si se extrajo con `--fields`
+  sin los campos críticos y avisa si el conteo no cuadró.
+- `run_transform`: valida el manifiesto → transforma → escribe CSV, Excel y
+  `alertas_<run_id>.csv` → **después** registra los pedidos reportados en el ledger → resume
+  en la bitácora.
 
-### `sinks/jsonl.py` y `sinks/tabular.py` — escribir archivos
+### `sinks/atomic.py`, `sinks/jsonl.py` y `sinks/tabular.py` — escribir archivos
 
+- `atomic_target` / `write_json_atomic` (`atomic.py`): la escritura atómica, en un solo lugar.
+  La usan todos los demás (JSONL, CSV, Excel, manifiesto y estado).
 - `write_jsonl`: un pedido por línea. Formato ideal para guardar datos tal cual llegan.
 - `write_csv`: para sistemas (separador `,`, punto decimal, UTF-8).
 - `write_xlsx`: para personas. Los montos quedan como números reales y se ven bien en Excel en español.
 
-Los tres escriben de forma **atómica**: primero a un archivo temporal y, solo si todo salió
+Todos escriben de forma **atómica**: primero a un archivo temporal y, solo si todo salió
 bien, lo renombran al nombre final. Si algo falla a mitad de camino, no queda un archivo incompleto.
 
 > **Simplificado en esta revisión:** se eliminaron `sinks/base.py` y la clase `JsonlSink`,
 > que nadie usaba.
+
+### `state.py` — la memoria entre corridas
+
+**Para qué:** que una corrida sepa qué hizo la anterior. Vive en `data/state/`.
+
+| Elemento              | Qué hace                                                                                                   |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `incremental_window` | Ventana de `--incremental`: desde el watermark menos 30 min (`OVERLAP`) hasta ahora; sin watermark, 7 días |
+| `load_watermark` / `save_watermark` | Leen y guardan `watermark.json`: hasta dónde llegó la última extracción **completa**       |
+| `Ledger`              | `reportados.json`: id del pedido → total y corrida en que se reportó. Evita duplicados entre reportes     |
+
+**Por qué JSON y no una base de datos:** `data/` vive en Google Drive. Un archivo que se
+reemplaza completo (escritura atómica) es lo más seguro frente a la sincronización; una
+base SQLite a medio escribir podría subirse corrupta. Una sola máquina debe ejecutar la
+tarea programada.
 
 ### `reconciliation/` y `erp/`
 
@@ -343,12 +382,13 @@ puede probar un 429, un 500 o un token vencido sin depender de la tienda real.
 | `test_client.py`        | Paginación, 429, 5xx, errores de red, 403/404 y la pausa por el límite de llamadas                                 |
 | `test_orders.py`        | Que el filtro arme bien los parámetros y que no se repitan pedidos                                                  |
 | `test_fulfillment.py`   | La bodega por línea y qué pasa si falta el permiso                                                                 |
-| `test_extract.py`       | El JSONL y el manifiesto de una corrida, y el aviso cuando el conteo no cuadra                                       |
+| `test_extract.py`       | El JSONL y el manifiesto de una corrida, el aviso cuando el conteo no cuadra y que no se sobrescriba una extracción |
+| `test_state.py`         | Watermark, ventana incremental y registro de pedidos reportados                                                      |
 | `test_normalize.py`     | Cada función de limpieza con muchos casos (cédulas, NIT, teléfonos, apellidos)                                    |
-| `test_siesa_lines.py`   | El pedido#1006 de punta a punta: filas, envío, cédula, exclusiones, alertas                                        |
-| `test_transform_run.py` | Que se escriban el CSV, el Excel y el log de alertas                                                                 |
+| `test_siesa_lines.py`   | El pedido#1006 de punta a punta: filas, envío, cédula, exclusiones, alertas, aislamiento de errores y ledger    |
+| `test_transform_run.py` | Que se escriban el CSV, el Excel y el log de alertas, y la validación del manifiesto                               |
 | `test_sinks.py`         | La escritura atómica (que no quede un archivo a medias)                                                             |
-| `test_cli.py`           | Los comandos completos, sus opciones y los códigos de salida                                                        |
+| `test_cli.py`           | Los comandos completos, sus opciones, el modo incremental y los códigos de salida                                 |
 
 **Cómo leer una prueba:** cada `test_...` arma una situación, ejecuta el código y verifica
 el resultado con `assert`. Ejemplo:
@@ -357,6 +397,9 @@ el resultado con `assert`. Ejemplo:
 def test_split_apellidos():
     assert split_apellidos("De la Torre Gómez") == ("De la Torre", "Gómez")
 ```
+
+**En GitHub:** cada push a `main` y cada pull request corre lint + pruebas en Windows y Linux
+(`.github/workflows/ci.yml`).
 
 **Correrlas:** `pytest` (todas) o `pytest tests/test_normalize.py -v` (un archivo, con detalle).
 Conviene correrlas después de cada cambio: si algo se rompe, la prueba lo indica.
@@ -375,7 +418,9 @@ Conviene correrlas después de cada cambio: si algo se rompe, la prueba lo indic
 | Cambiar la versión de la API de Shopify   | `.env` → `SHOPIFY_API_VERSION`                                                     |
 | Cambiar cuántas veces se reintenta        | `config.py` → `max_attempts`                                                       |
 | Agregar una opción de terminal            | `cli.py` → `build_parser`                                                          |
-| Cambiar dónde se guardan los archivos     | Opciones`--output-dir`, `--processed-dir`, `--log-dir`                            |
+| Cambiar dónde se guardan los archivos     | Opciones`--output-dir`, `--processed-dir`, `--log-dir`, `--state-dir`             |
+| Cambiar el solape del modo incremental     | `state.py` → `OVERLAP`                                                             |
+| Volver a reportar un pedido ya reportado   | Quitar su id de `data/state/reportados.json`, o `transform --sin-ledger` para revisar |
 
 Después de cualquier cambio: `pytest`. Si agregas una regla, agrega también una prueba en el
 `test_...` del archivo que tocaste.

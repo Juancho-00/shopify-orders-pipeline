@@ -13,33 +13,22 @@ Ambos se escriben de forma atómica (temporal + renombrar).
 from __future__ import annotations
 
 import csv
-import os
-import tempfile
 from collections.abc import Iterable, Sequence
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-
-def _atomic_target(path: Path) -> tuple[int, str]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+from shopify_pipeline.sinks.atomic import atomic_target
 
 
 def write_csv(rows: Iterable[dict[str, Any]], path: Path, columns: Sequence[str]) -> int:
-    fd, tmp_name = _atomic_target(path)
     count = 0
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=list(columns), extrasaction="ignore")
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
-                count += 1
-        os.replace(tmp_name, path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+    with atomic_target(path) as tmp, tmp.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(columns), extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+            count += 1
     return count
 
 
@@ -78,12 +67,6 @@ def write_xlsx(
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
 
-    fd, tmp_name = _atomic_target(path)
-    os.close(fd)
-    try:
-        wb.save(tmp_name)
-        os.replace(tmp_name, path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+    with atomic_target(path) as tmp:
+        wb.save(tmp)
     return len(rows)

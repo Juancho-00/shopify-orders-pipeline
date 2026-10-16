@@ -17,10 +17,10 @@ bajo indica que lo agregó el pipeline, no Shopify). Solo se guardan los campos 
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
-from shopify_pipeline.exceptions import ShopifyPermissionError
+from shopify_pipeline.exceptions import ShopifyNotFoundError, ShopifyPermissionError
 from shopify_pipeline.shopify.client import ShopifyClient
 
 logger = logging.getLogger(__name__)
@@ -58,16 +58,31 @@ class BodegaEnricher:
     Si el token no tiene el scope necesario (403), registra el error una sola vez,
     deja de consultar y continúa: los pedidos salen sin bodega y con la alerta
     ``SIN_BODEGA``, en lugar de detener toda la extracción.
+
+    Si un pedido puntual responde 404 (p. ej. se eliminó durante la corrida), se registra
+    y se sigue con el siguiente: un pedido no debe tumbar la extracción completa.
+
+    ``debe_consultar`` (opcional) decide pedido por pedido si vale la pena gastar la
+    llamada: la CLI la usa para saltarse los pedidos que no van a salir en el reporte
+    (pendientes de pago, cancelados, de prueba o ya reportados). Sin ella, consulta todos.
     """
 
-    def __init__(self, client: ShopifyClient) -> None:
+    def __init__(
+        self,
+        client: ShopifyClient,
+        debe_consultar: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> None:
         self.client = client
+        self.debe_consultar = debe_consultar
         self.enabled = True
         self.enriched = 0
+        self.omitidos = 0  # Pedidos a los que no se les consultó la bodega por no ser necesarios.
 
     def enrich(self, orders: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
         for order in orders:
-            if self.enabled:
+            if self.enabled and self.debe_consultar is not None and not self.debe_consultar(order):
+                self.omitidos += 1
+            elif self.enabled:
                 try:
                     order[FULFILLMENT_KEY] = fetch_fulfillment_orders(self.client, order["id"])
                     self.enriched += 1
@@ -79,6 +94,8 @@ class BodegaEnricher:
                         exc,
                     )
                     self.enabled = False
+                except ShopifyNotFoundError as exc:
+                    logger.warning("Bodega no disponible para el pedido %s: %s", order.get("name"), exc)
             yield order
 
 

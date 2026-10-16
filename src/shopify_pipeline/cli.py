@@ -13,6 +13,7 @@ QUÉ HACE
 
     shopify-pipeline extract --days 7
     shopify-pipeline extract --since 2026-10-01 --until 2026-10-08 --status any
+    shopify-pipeline extract --incremental          # tarea programada: retoma desde la última corrida buena
     shopify-pipeline extract --days 3 --filtrar-por actualizacion   # captura pagos confirmados tarde
     shopify-pipeline transform                      # rehace el reporte Siesa de la última extracción
 
@@ -25,6 +26,9 @@ Códigos de salida:
     1  error transitorio (red / Shopify) tras agotar reintentos
     2  error de configuración o credenciales (no se arregla reintentando)
     3  extracción completa pero el conteo no cuadró contra Shopify (--strict)
+    4  error de datos: archivo crudo dañado, extracción incompleta, o (con --strict)
+       pedidos que no se pudieron transformar
+    5  error inesperado (bug): revisar la bitácora; reintentar no sirve
 """
 
 from __future__ import annotations
@@ -33,38 +37,52 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Callable
 from datetime import date, datetime, time, timezone
 from pathlib import Path
+from typing import Any
 
 import requests
 
 from shopify_pipeline import __version__
 from shopify_pipeline.config import ShopifyConfig, load_env_file
-from shopify_pipeline.exceptions import CONFIGURATION_ERRORS, ShopifyError
+from shopify_pipeline.exceptions import CONFIGURATION_ERRORS, ConfigError, DataError, ShopifyError
 from shopify_pipeline.extract import DEFAULT_OUTPUT_DIR, run_extraction
 from shopify_pipeline.logs import setup_logging
 from shopify_pipeline.shopify.client import ShopifyClient
 from shopify_pipeline.shopify.orders import VALID_STATUSES, OrderFilter
+from shopify_pipeline.state import DEFAULT_STATE_DIR, Ledger, incremental_window, save_watermark
+from shopify_pipeline.transform.normalize import BOGOTA
 from shopify_pipeline.transform.run import (
     DEFAULT_LOG_DIR,
     DEFAULT_PROCESSED_DIR,
     latest_raw_file,
     run_transform,
 )
-from shopify_pipeline.transform.siesa_lines import DEFAULT_ESTADOS_PAGO, SiesaLinesOptions
+from shopify_pipeline.transform.siesa_lines import (
+    CAMPOS_REQUERIDOS,
+    DEFAULT_ESTADOS_PAGO,
+    SiesaLinesOptions,
+    va_al_reporte,
+)
 
 logger = logging.getLogger("shopify_pipeline")
 
-EXIT_OK, EXIT_TRANSIENT, EXIT_CONFIG, EXIT_UNRECONCILED = 0, 1, 2, 3
+EXIT_OK, EXIT_TRANSIENT, EXIT_CONFIG, EXIT_UNRECONCILED, EXIT_DATA, EXIT_UNEXPECTED = 0, 1, 2, 3, 4, 5
 
 DATE_FIELDS = {"creacion": "created_at", "actualizacion": "updated_at"}
 
 
 def _parse_date(value: str) -> datetime:
-    """Acepta ``YYYY-MM-DD`` (00:00 UTC) o un ISO 8601 completo con zona horaria."""
+    """
+    Acepta ``YYYY-MM-DD`` o un ISO 8601 completo con zona horaria.
+
+    Una fecha sola es la medianoche en hora de COLOMBIA: "pedidos del 1 de octubre" debe
+    ser el día de la tienda, no el día UTC (que empieza a las 19:00 del día anterior).
+    """
     try:
         if len(value) == 10:
-            return datetime.combine(date.fromisoformat(value), time.min, tzinfo=timezone.utc)
+            return datetime.combine(date.fromisoformat(value), time.min, tzinfo=BOGOTA)
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"Fecha inválida: {value!r}") from exc
@@ -89,6 +107,12 @@ def _add_siesa_options(p: argparse.ArgumentParser) -> None:
     g.add_argument("--incluir-cancelados", action="store_true", help="Incluye pedidos cancelados.")
     g.add_argument("--incluir-pruebas", action="store_true", help="Incluye pedidos de prueba (test).")
     g.add_argument("--processed-dir", type=Path, default=DEFAULT_PROCESSED_DIR)
+    g.add_argument(
+        "--sin-ledger",
+        action="store_true",
+        help="No consulta ni actualiza el registro de pedidos ya reportados "
+        "(data/state/reportados.json). Genera archivos *_revision: para revisar, no para cargar a Siesa.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,14 +125,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--log-dir", type=Path, default=DEFAULT_LOG_DIR, help="Carpeta de logs (default: data/logs)."
     )
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=DEFAULT_STATE_DIR,
+        help="Estado entre corridas: watermark y pedidos reportados (default: data/state).",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     ext = sub.add_parser("extract", help="Fase 1: extrae pedidos de Shopify y genera el reporte Siesa.")
     window = ext.add_mutually_exclusive_group()
     window.add_argument("--days", type=int, default=None, help="Últimos N días (default: 7).")
-    window.add_argument("--since", type=_parse_date, help="Inicio de la ventana (YYYY-MM-DD o ISO).")
+    window.add_argument(
+        "--since",
+        type=_parse_date,
+        help="Inicio de la ventana (YYYY-MM-DD en hora Colombia, o ISO con zona horaria).",
+    )
+    window.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Ventana desde la última extracción completa (menos 30 min) hasta ahora, sobre la "
+        "fecha de actualización. Recomendado para la tarea programada: no deja huecos.",
+    )
     ext.add_argument(
-        "--until", type=_parse_date, help="Fin de la ventana (default: ahora). Requiere --since."
+        "--until",
+        type=_parse_date,
+        help="Fin de la ventana (default: ahora). Mismo formato que --since. Requiere --since.",
     )
     ext.add_argument(
         "--filtrar-por",
@@ -124,10 +166,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--sin-bodega", action="store_true", help="No consulta la bodega (ahorra una llamada por pedido)."
     )
     ext.add_argument(
+        "--bodega-todos",
+        action="store_true",
+        help="Consulta la bodega de todos los pedidos. Por defecto solo la de los que van al reporte "
+        "(pagados, no cancelados ni de prueba, no reportados antes).",
+    )
+    ext.add_argument(
         "--solo-raw", action="store_true", help="Solo guarda el JSONL; no genera el reporte Siesa."
     )
     ext.add_argument(
-        "--strict", action="store_true", help="Sale con código 3 si el conteo no cuadra con Shopify."
+        "--strict",
+        action="store_true",
+        help="Código 3 si el conteo no cuadra con Shopify; 4 si hay pedidos que no se pudieron transformar.",
     )
     _add_siesa_options(ext)
 
@@ -136,15 +186,39 @@ def build_parser() -> argparse.ArgumentParser:
         "--input", type=Path, default=None, help="Archivo .jsonl (default: la última extracción)."
     )
     tr.add_argument("--raw-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    tr.add_argument(
+        "--strict",
+        action="store_true",
+        help="Código 3 si la extracción no cuadró; 4 si hay pedidos que no se pudieron transformar.",
+    )
     _add_siesa_options(tr)
     return parser
 
 
+def _parse_fields(args: argparse.Namespace) -> tuple[str, ...] | None:
+    if not args.fields:
+        return None
+    fields = tuple(f.strip() for f in args.fields.split(",") if f.strip())
+    if args.solo_raw:
+        return fields
+    # Se va a generar el reporte Siesa: sin estos campos saldría incompleto (p. ej. sin
+    # ``test`` los pedidos de prueba pasarían). Se agregan siempre.
+    extra = tuple(f for f in CAMPOS_REQUERIDOS if f not in fields)
+    if extra:
+        logger.info("--fields: se agregan %d campos que necesita el reporte Siesa.", len(extra))
+    return fields + extra
+
+
 def build_filter(args: argparse.Namespace) -> OrderFilter:
-    fields = tuple(f.strip() for f in args.fields.split(",") if f.strip()) if args.fields else None
+    fields = _parse_fields(args)
     if args.until and not args.since:
-        raise ValueError("--until requiere --since.")
+        raise ConfigError("--until requiere --since.")
     common = {"status": args.status, "fields": fields, "date_field": DATE_FIELDS[args.filtrar_por]}
+    if args.incremental:
+        # La ventana incremental siempre va sobre updated_at: así entran también los
+        # pedidos antiguos cuyo pago se confirmó después (contraentrega).
+        date_min, date_max = incremental_window(args.state_dir)
+        return OrderFilter(date_min=date_min, date_max=date_max, **(common | {"date_field": "updated_at"}))
     if args.since:
         until = args.until or datetime.now(timezone.utc).replace(microsecond=0)
         return OrderFilter(date_min=args.since, date_max=until, **common)
@@ -156,7 +230,7 @@ def _parse_estados(value: str) -> frozenset[str] | None:
         return None
     estados = frozenset(e.strip().lower() for e in value.split(",") if e.strip())
     if not estados:
-        raise ValueError("--estados-pago no puede estar vacío (use 'todos' para no filtrar).")
+        raise ConfigError("--estados-pago no puede estar vacío (use 'todos' para no filtrar).")
     return estados
 
 
@@ -169,25 +243,82 @@ def _siesa_options(args: argparse.Namespace) -> SiesaLinesOptions:
     )
 
 
+def _ledger(args: argparse.Namespace) -> Ledger | None:
+    return None if args.sin_ledger else Ledger.open(args.state_dir)
+
+
+def _sufijo(args: argparse.Namespace) -> str:
+    # Sin ledger el reporte puede traer pedidos ya cargados: nunca debe reemplazar al oficial.
+    return "_revision" if args.sin_ledger else ""
+
+
+def _codigo_strict(args: argparse.Namespace, reconciled: bool, errores: int) -> int:
+    if not args.strict:
+        return EXIT_OK
+    if not reconciled:
+        return EXIT_UNRECONCILED
+    if errores:
+        return EXIT_DATA
+    return EXIT_OK
+
+
+def _filtro_bodega(
+    args: argparse.Namespace, ledger: Ledger | None
+) -> Callable[[dict[str, Any]], bool] | None:
+    """Qué pedidos merecen la llamada de bodega (una por pedido). None = todos."""
+    if args.bodega_todos or args.solo_raw:
+        return None
+    options = _siesa_options(args)
+    return lambda order: va_al_reporte(order, options, ledger)
+
+
 def _cmd_extract(args: argparse.Namespace) -> int:
     flt = build_filter(args)
+    # El ledger se abre antes de extraer: si está dañado, falla sin gastar llamadas a Shopify.
+    ledger = None if args.solo_raw else _ledger(args)
     client = ShopifyClient(ShopifyConfig.from_env())
-    result = run_extraction(client, flt, output_dir=args.output_dir, consultar_bodega=not args.sin_bodega)
+    result = run_extraction(
+        client,
+        flt,
+        output_dir=args.output_dir,
+        consultar_bodega=not args.sin_bodega,
+        incremental=args.incremental,
+        debe_consultar_bodega=_filtro_bodega(args, ledger),
+    )
+    errores = 0
     if not args.solo_raw:
-        run_transform(
-            args.output_dir / result.output_file, args.processed_dir, _siesa_options(args), args.log_dir
+        run = run_transform(
+            args.output_dir / result.output_file,
+            args.processed_dir,
+            _siesa_options(args),
+            args.log_dir,
+            ledger=ledger,
+            sufijo=_sufijo(args),
         )
-    if args.strict and not result.reconciled:
-        return EXIT_UNRECONCILED
-    return EXIT_OK
+        errores = run.result.errores
+    if args.incremental:
+        # El watermark solo avanza si la extracción quedó completa. Si no cuadró, la próxima
+        # corrida vuelve a cubrir este periodo (el ledger evita reportar dos veces).
+        if result.reconciled:
+            save_watermark(flt.date_max, result.run_id, args.state_dir)
+        else:
+            logger.warning("Watermark sin cambios: la próxima corrida repetirá este periodo.")
+    return _codigo_strict(args, result.reconciled, errores)
 
 
 def _cmd_transform(args: argparse.Namespace) -> int:
     raw_file = args.input or latest_raw_file(args.raw_dir)
     if not raw_file.exists():
-        raise ValueError(f"No existe el archivo {raw_file}.")
-    run_transform(raw_file, args.processed_dir, _siesa_options(args), args.log_dir)
-    return EXIT_OK
+        raise ConfigError(f"No existe el archivo {raw_file}.")
+    run = run_transform(
+        raw_file,
+        args.processed_dir,
+        _siesa_options(args),
+        args.log_dir,
+        ledger=_ledger(args),
+        sufijo=_sufijo(args),
+    )
+    return _codigo_strict(args, run.reconciled, run.result.errores)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -211,12 +342,22 @@ def main(argv: list[str] | None = None) -> int:
     except CONFIGURATION_ERRORS as exc:
         logger.error("Error de configuración/credenciales: %s", exc)
         return EXIT_CONFIG
+    except DataError as exc:
+        logger.error("Error de datos: %s", exc)
+        return EXIT_DATA
     except ShopifyError as exc:
         logger.error("Error de Shopify: %s", exc)
         return EXIT_TRANSIENT
-    except requests.RequestException as exc:
+    except requests.RequestException as exc:  # Va antes de OSError: es una subclase.
         logger.error("Error de red tras agotar reintentos: %s", exc)
         return EXIT_TRANSIENT
+    except OSError as exc:
+        # Archivo abierto en Excel, bloqueado por la sincronización de Drive, disco lleno...
+        logger.error("Error al leer o escribir archivos: %s. Cierre el archivo y reintente.", exc)
+        return EXIT_TRANSIENT
+    except Exception:
+        logger.exception("Error inesperado (posible bug). Reintentar no lo resolverá.")
+        return EXIT_UNEXPECTED
     return EXIT_OK  # pragma: no cover
 
 

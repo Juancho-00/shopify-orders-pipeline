@@ -11,6 +11,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from shopify_pipeline.exceptions import ConfigError
+
 DEFAULT_API_VERSION = "2026-10"  # Última versión estable (oct-2026). Revisar cada trimestre.
 
 
@@ -41,18 +43,18 @@ class ShopifyConfig:
         domain = self.shop_domain.strip().lower()
         domain = domain.removeprefix("https://").removeprefix("http://").rstrip("/")
         if not domain.endswith(".myshopify.com"):
-            raise ValueError(
+            raise ConfigError(
                 "SHOPIFY_SHOP_DOMAIN debe ser el dominio interno 'tienda.myshopify.com', "
                 "no el dominio público de la tienda."
             )
         object.__setattr__(self, "shop_domain", domain)
         if not self.access_token and not (self.client_id and self.client_secret):
-            raise ValueError(
+            raise ConfigError(
                 "Faltan credenciales: defina SHOPIFY_ACCESS_TOKEN, o bien "
                 "SHOPIFY_CLIENT_ID y SHOPIFY_CLIENT_SECRET."
             )
         if not 0 < self.throttle_threshold <= 1:
-            raise ValueError("throttle_threshold debe estar en (0, 1].")
+            raise ConfigError("throttle_threshold debe estar en (0, 1].")
 
     @property
     def timeout(self) -> tuple[float, float]:
@@ -63,7 +65,7 @@ class ShopifyConfig:
         """Construye la configuración desde variables de entorno."""
         domain = os.environ.get("SHOPIFY_SHOP_DOMAIN")
         if not domain:
-            raise ValueError("Variable de entorno SHOPIFY_SHOP_DOMAIN no definida.")
+            raise ConfigError("Variable de entorno SHOPIFY_SHOP_DOMAIN no definida.")
         return cls(
             shop_domain=domain,
             api_version=os.environ.get("SHOPIFY_API_VERSION") or DEFAULT_API_VERSION,

@@ -7,6 +7,23 @@ class PipelineError(Exception):
     """Error base de todo el pipeline."""
 
 
+class ConfigError(PipelineError, ValueError):
+    """
+    Configuración o argumentos inválidos (``.env`` incompleto, ventana de fechas mal
+    armada, carpeta sin extracciones...). Reintentar no sirve: hay que corregir algo.
+
+    Hereda de ``ValueError`` para que el código que ya capturaba ``ValueError`` siga
+    funcionando.
+    """
+
+
+class DataError(PipelineError):
+    """
+    Los datos de entrada no sirven para continuar: archivo JSONL corrupto, extracción
+    hecha con ``--fields`` sin los campos que necesita la transformación, etc.
+    """
+
+
 # --------------------------------------------------------------------- Shopify
 class ShopifyError(PipelineError):
     """Error base de la integración con Shopify."""
@@ -37,9 +54,10 @@ class ShopifyRetryableError(ShopifyError):
 
 
 # Errores que indican un problema de configuración (no se resuelven reintentando).
+# Un ValueError genérico NO está aquí: casi siempre es un dato malo o un bug, no el .env.
 CONFIGURATION_ERRORS: tuple[type[Exception], ...] = (
     ShopifyAuthError,
     ShopifyPermissionError,
     ShopifyNotFoundError,
-    ValueError,
+    ConfigError,
 )

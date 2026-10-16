@@ -43,6 +43,10 @@ DESCRIPCIONES: dict[str, str] = {
     "PAGO_NO_CONFIRMADO": "Excluido: el pago no está confirmado",
     "CANCELADO": "Excluido: pedido cancelado",
     "PRUEBA": "Excluido: pedido de prueba",
+    "YA_REPORTADO": "Excluido: el pedido ya salió en el reporte de una corrida anterior",
+    "CAMBIO_POST_REPORTE": "Excluido: ya se reportó, pero su total cambió después (revisar en Siesa)",
+    "DATOS_INCOMPLETOS": "Excluido: al pedido le faltan campos necesarios (¿extracción con --fields?)",
+    "ERROR_TRANSFORMACION": "Excluido: error inesperado al transformar el pedido (ver bitácora)",
 }
 
 EVENT_COLUMNS: tuple[str, ...] = (

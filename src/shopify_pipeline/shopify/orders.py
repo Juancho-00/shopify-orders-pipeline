@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from shopify_pipeline.exceptions import ConfigError
 from shopify_pipeline.shopify.client import ShopifyClient
 
 MAX_PAGE_SIZE = 250  # Máximo permitido por Shopify en endpoints REST de listado.
@@ -41,15 +42,17 @@ class OrderFilter:
 
     def __post_init__(self) -> None:
         if self.date_min.tzinfo is None or self.date_max.tzinfo is None:
-            raise ValueError("Use datetimes con zona horaria (timezone-aware).")
+            raise ConfigError("Use datetimes con zona horaria (timezone-aware).")
         if self.date_min >= self.date_max:
-            raise ValueError("La fecha inicial debe ser anterior a la fecha final.")
+            raise ConfigError("La fecha inicial debe ser anterior a la fecha final.")
         if self.date_field not in VALID_DATE_FIELDS:
-            raise ValueError(f"date_field inválido: {self.date_field}. Opciones: {sorted(VALID_DATE_FIELDS)}")
+            raise ConfigError(
+                f"date_field inválido: {self.date_field}. Opciones: {sorted(VALID_DATE_FIELDS)}"
+            )
         if self.status not in VALID_STATUSES:
-            raise ValueError(f"status inválido: {self.status}. Opciones: {sorted(VALID_STATUSES)}")
+            raise ConfigError(f"status inválido: {self.status}. Opciones: {sorted(VALID_STATUSES)}")
         if not 1 <= self.page_size <= MAX_PAGE_SIZE:
-            raise ValueError(f"page_size debe estar entre 1 y {MAX_PAGE_SIZE}.")
+            raise ConfigError(f"page_size debe estar entre 1 y {MAX_PAGE_SIZE}.")
         if self.fields is not None and "id" not in self.fields:
             # 'id' es necesario para deduplicar y conciliar.
             object.__setattr__(self, "fields", ("id", *self.fields))
@@ -57,7 +60,7 @@ class OrderFilter:
     @classmethod
     def last_n_days(cls, days: int, **kwargs: Any) -> OrderFilter:
         if days <= 0:
-            raise ValueError("days debe ser mayor que 0.")
+            raise ConfigError("days debe ser mayor que 0.")
         now = datetime.now(timezone.utc).replace(microsecond=0)
         return cls(date_min=now - timedelta(days=days), date_max=now, **kwargs)
 

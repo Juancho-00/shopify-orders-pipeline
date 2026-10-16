@@ -13,17 +13,22 @@ Reglas principales (detalle en ``docs/mapeo_siesa.md``):
 * Envío: si el valor cobrado es mayor a cero, se agrega una línea con la referencia
   configurada (por defecto ``ENVIO``).
 * Solo pasan pedidos con pago confirmado. Los cancelados y de prueba se excluyen.
-* Nada se descarta en silencio: las exclusiones y los datos faltantes o dudosos quedan
-  como *eventos* en el log de alertas, fuera del reporte.
+* Un pedido que ya salió en un reporte anterior no se repite (registro de reportados).
+* Nada se descarta en silencio: las exclusiones, los datos faltantes o dudosos y los
+  pedidos que no se pudieron transformar quedan como *eventos* en el log de alertas.
+* Un pedido con datos malos no detiene la corrida: queda como ``ERROR_TRANSFORMACION``
+  y los demás siguen.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from shopify_pipeline.exceptions import DataError
 from shopify_pipeline.shopify.fulfillment import FULFILLMENT_KEY, location_by_line_item
 from shopify_pipeline.transform.alertas import Evento
 from shopify_pipeline.transform.normalize import (
@@ -35,6 +40,46 @@ from shopify_pipeline.transform.normalize import (
     split_nombres,
     to_bogota,
     to_decimal,
+)
+
+if TYPE_CHECKING:
+    from shopify_pipeline.state import Ledger
+
+logger = logging.getLogger(__name__)
+
+# Campos del pedido que usa esta transformación. Si se extrae con ``--fields``, la CLI
+# los agrega siempre (salvo con ``--solo-raw``) para no generar un reporte incompleto.
+CAMPOS_REQUERIDOS: tuple[str, ...] = (
+    "id",
+    "name",
+    "order_number",
+    "created_at",
+    "updated_at",
+    "processed_at",
+    "financial_status",
+    "cancelled_at",
+    "cancel_reason",
+    "test",
+    "taxes_included",
+    "current_total_price",
+    "total_price",
+    "billing_address",
+    "shipping_address",
+    "customer",
+    "email",
+    "contact_email",
+    "phone",
+    "line_items",
+    "shipping_lines",
+    "note",
+    "note_attributes",
+)
+
+# Claves sin las cuales las exclusiones o los controles fallarían EN SILENCIO (p. ej. sin
+# ``test`` un pedido de prueba pasaría al reporte). Shopify incluye la clave con ``null``
+# cuando el campo se pidió; si la clave falta es porque se proyectó con ``--fields``.
+CLAVES_CRITICAS: frozenset[str] = frozenset(
+    {"id", "test", "cancelled_at", "financial_status", "line_items", "taxes_included"}
 )
 
 COLUMNS: tuple[str, ...] = (
@@ -113,6 +158,14 @@ class TransformResult:
     eventos: list[Evento] = field(default_factory=list)
     pedidos_procesados: int = 0
     pedidos_excluidos: dict[str, int] = field(default_factory=dict)
+    # (id del pedido, total) de los pedidos que salieron en el reporte: se registran en el
+    # ledger solo después de escribir los archivos.
+    reportados: list[tuple[int, str]] = field(default_factory=list)
+
+    @property
+    def errores(self) -> int:
+        """Pedidos que no se pudieron transformar (dato malo o campos faltantes)."""
+        return sum(self.pedidos_excluidos.get(c, 0) for c in ("ERROR_TRANSFORMACION", "DATOS_INCOMPLETOS"))
 
     @property
     def alertas(self) -> list[Evento]:
@@ -138,11 +191,24 @@ def _tasa(tax_lines: list[dict[str, Any]] | None) -> Decimal:
     return total.quantize(Decimal("0.0001"))
 
 
-def _descuento(item: dict[str, Any]) -> Decimal:
+def _descuento(item: dict[str, Any], cantidad: int) -> Decimal:
+    """
+    Descuento de la línea para la ``cantidad`` vigente.
+
+    Shopify calcula ``discount_allocations`` sobre la cantidad ORIGINAL (``quantity``).
+    Si después se reembolsaron unidades (``current_quantity`` menor), se prorratea: de lo
+    contrario el descuento completo se restaría a menos unidades y la línea quedaría
+    subvaluada.
+    """
     allocations = item.get("discount_allocations") or []
     if allocations:
-        return sum((to_decimal(a.get("amount")) for a in allocations), Decimal("0.00"))
-    return to_decimal(item.get("total_discount"))
+        total = sum((to_decimal(a.get("amount")) for a in allocations), Decimal("0.00"))
+    else:
+        total = to_decimal(item.get("total_discount"))
+    original = item.get("quantity") or cantidad
+    if 0 < cantidad < original:
+        total = (total * cantidad / original).quantize(TWO_PLACES, ROUND_HALF_UP)
+    return total
 
 
 def _notas(order: dict[str, Any]) -> str:
@@ -267,7 +333,7 @@ def order_to_lines(order: dict[str, Any], options: SiesaLinesOptions | None = No
             alerta("SIN_BODEGA" if has_fulfillment else "BODEGA_NO_CONSULTADA", numero_linea, referencia)
 
         precio = to_decimal(item.get("price"))
-        descuento = _descuento(item)
+        descuento = _descuento(item, cantidad)
         out.rows.append(
             base
             | {
@@ -329,6 +395,18 @@ def _diferencia_total(order: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     return f"Shopify {total_shopify} vs líneas {total_lineas}"
 
 
+def validar_contrato(order: dict[str, Any]) -> None:
+    """Falla si al pedido le faltan claves sin las cuales el resultado sería incorrecto."""
+    faltan = CLAVES_CRITICAS - order.keys()
+    if faltan:
+        raise DataError(f"faltan campos {sorted(faltan)} (¿extracción con --fields?)")
+
+
+def total_pedido(order: dict[str, Any]) -> str:
+    """Total vigente del pedido (tras reembolsos), como texto con 2 decimales."""
+    return str(to_decimal(_first(order.get("current_total_price"), order.get("total_price"))))
+
+
 def _motivo_exclusion(order: dict[str, Any], options: SiesaLinesOptions) -> tuple[str, str] | None:
     if order.get("test") and not options.incluir_pruebas:
         return "PRUEBA", ""
@@ -340,22 +418,77 @@ def _motivo_exclusion(order: dict[str, Any], options: SiesaLinesOptions) -> tupl
     return None
 
 
+def va_al_reporte(order: dict[str, Any], options: SiesaLinesOptions, ledger: Ledger | None = None) -> bool:
+    """
+    ¿El pedido saldrá en el reporte Siesa de una corrida NUEVA? Se usa antes de consultar
+    la bodega para no gastar una llamada a Shopify en pedidos que se van a excluir.
+    Ante la duda (p. ej. faltan claves), responde True: mejor una llamada de más que una
+    línea sin bodega.
+    """
+    if CLAVES_CRITICAS - order.keys():
+        return True
+    if _motivo_exclusion(order, options) is not None:
+        return False
+    return ledger is None or ledger.get(order["id"]) is None
+
+
+def _motivo_ledger(order: dict[str, Any], ledger: Ledger, run_id: str) -> tuple[str, str] | None:
+    """
+    ¿El pedido ya salió en el reporte de OTRA corrida? Con ventanas solapadas (modo
+    incremental) un pedido aparece en varias extracciones; aquí se evita duplicarlo.
+    Regenerar el reporte de la misma corrida (``transform``) no lo excluye.
+    """
+    previo = ledger.get(order["id"])
+    if previo is None or previo.run_id == run_id:
+        return None
+    total = total_pedido(order)
+    if total == previo.total:
+        return "YA_REPORTADO", f"run={previo.run_id}"
+    return "CAMBIO_POST_REPORTE", f"total {previo.total} → {total} (run={previo.run_id})"
+
+
 def transform_orders(
-    orders: Iterable[dict[str, Any]], options: SiesaLinesOptions | None = None
+    orders: Iterable[dict[str, Any]],
+    options: SiesaLinesOptions | None = None,
+    ledger: Ledger | None = None,
+    run_id: str = "",
 ) -> TransformResult:
-    """Transforma los pedidos, aplica las exclusiones y acumula los eventos para el log."""
+    """
+    Transforma los pedidos, aplica las exclusiones y acumula los eventos para el log.
+
+    ``ledger`` (opcional) es el registro de pedidos ya reportados en corridas anteriores.
+    """
     options = options or SiesaLinesOptions()
     result = TransformResult()
+
+    def excluir(order: dict[str, Any], codigo: str, detalle: str) -> None:
+        pedido, doc_ref = _pedido_ids(order)
+        result.eventos.append(Evento("EXCLUIDO", codigo, pedido, doc_ref, detalle=detalle))
+        result.pedidos_excluidos[codigo] = result.pedidos_excluidos.get(codigo, 0) + 1
+
     for order in orders:
-        motivo = _motivo_exclusion(order, options)
-        if motivo:
-            codigo, detalle = motivo
-            pedido, doc_ref = _pedido_ids(order)
-            result.eventos.append(Evento("EXCLUIDO", codigo, pedido, doc_ref, detalle=detalle))
-            result.pedidos_excluidos[codigo] = result.pedidos_excluidos.get(codigo, 0) + 1
+        # Cada pedido se procesa aislado: un dato malo (monto o fecha con formato raro,
+        # estructura inesperada) excluye ESE pedido y queda en el log; los demás siguen.
+        try:
+            validar_contrato(order)
+            motivo = _motivo_exclusion(order, options)
+            if motivo is None and ledger is not None:
+                motivo = _motivo_ledger(order, ledger, run_id)
+            if motivo:
+                excluir(order, *motivo)
+                continue
+            transformado = order_to_lines(order, options)
+            total = total_pedido(order)
+        except DataError as exc:
+            excluir(order, "DATOS_INCOMPLETOS", str(exc))
             continue
-        transformado = order_to_lines(order, options)
+        except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError) as exc:
+            logger.exception("No se pudo transformar el pedido %s", clean_text(order.get("name")))
+            excluir(order, "ERROR_TRANSFORMACION", f"{type(exc).__name__}: {exc}"[:300])
+            continue
         result.rows.extend(transformado.rows)
         result.eventos.extend(transformado.eventos)
         result.pedidos_procesados += 1
+        if transformado.rows:
+            result.reportados.append((order["id"], total))
     return result

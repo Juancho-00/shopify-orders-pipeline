@@ -71,7 +71,7 @@ el número. La regla anterior es provisional; está aislada en `parse_documento`
 | `bodega` / `id_bodega_shopify` | Bodega de salida | `fulfillment_orders[].assigned_location` (llamada extra por pedido) | Vacío |
 | `cantidad` | Cantidad ordenada | `current_quantity` (o `quantity`) | `1` |
 | `precio_unitario` | Precio unitario | `line_items[].price` | `shipping_lines[].discounted_price` |
-| `descuento_linea` | — | Suma de `discount_allocations` | `0` |
+| `descuento_linea` | — | Suma de `discount_allocations`; con reembolso parcial, prorrateada: `descuento × current_quantity / quantity` | `0` |
 | `valor_total_linea` | — | `precio × cantidad − descuento` | Igual al precio |
 | `tasa_iva` | — | Suma de `tax_lines[].rate` | Ídem |
 | `precio_incluye_iva` | — | `taxes_included` | Ídem |
@@ -137,6 +137,10 @@ una fila por evento. El log no incluye datos personales del cliente.
 | `SIN_BODEGA` | Línea | Shopify no tiene la línea asignada a ninguna bodega |
 | `BODEGA_NO_CONSULTADA` | Línea | Se ejecutó con `--sin-bodega` o falta el permiso para consultar bodegas |
 | `PAGO_NO_CONFIRMADO` / `CANCELADO` / `PRUEBA` | Exclusión | Ver *Exclusiones* |
+| `YA_REPORTADO` | Exclusión | El pedido ya salió en el reporte de otra corrida (ventanas solapadas); no se repite |
+| `CAMBIO_POST_REPORTE` | Exclusión | Ya se reportó, pero su total cambió después (p. ej. un reembolso): revisar a mano en Siesa |
+| `DATOS_INCOMPLETOS` | Exclusión | Al pedido le faltan campos críticos (extracción con `--fields`) |
+| `ERROR_TRANSFORMACION` | Exclusión | Un dato del pedido no se pudo procesar; la traza queda en la bitácora. Los demás pedidos siguen |
 
 Además, cada ejecución queda en la bitácora `data/logs/shopify_pipeline_AAAAMMDD.log`
 (inicio, ventana consultada, conteos, resumen de alertas y errores).

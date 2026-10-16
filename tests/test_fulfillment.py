@@ -57,3 +57,26 @@ def test_enricher_sin_scope_continua_sin_bodega(client, caplog):
     assert all(FULFILLMENT_KEY not in o for o in orders)
     assert len(responses.calls) == 1  # Tras el 403 deja de consultar
     assert "read_merchant_managed_fulfillment_orders" in caplog.text
+
+
+@responses.activate
+def test_enricher_404_de_un_pedido_no_detiene_la_extraccion(client):
+    responses.get(f"{BASE}/orders/1/fulfillment_orders.json", status=404)
+    responses.get(FO_URL, json=_fo_payload())
+    enricher = BodegaEnricher(client)
+    orders = list(enricher.enrich([{"id": 1, "name": "#1"}, {"id": ORDER_ID}]))
+
+    assert FULFILLMENT_KEY not in orders[0]  # Saldrá con alerta BODEGA_NO_CONSULTADA
+    assert FULFILLMENT_KEY in orders[1]
+    assert enricher.enabled
+
+
+@responses.activate
+def test_enricher_omite_pedidos_que_no_van_al_reporte(client):
+    responses.get(FO_URL, json=_fo_payload())
+    enricher = BodegaEnricher(client, debe_consultar=lambda o: o["id"] == ORDER_ID)
+    orders = list(enricher.enrich([{"id": 1}, {"id": ORDER_ID}, {"id": 2}]))
+
+    assert [FULFILLMENT_KEY in o for o in orders] == [False, True, False]
+    assert (enricher.enriched, enricher.omitidos) == (1, 2)
+    assert len(responses.calls) == 1

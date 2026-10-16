@@ -84,3 +84,78 @@ Registro breve de decisiones de diseño y su motivo.
   mismas pruebas siguen pasando.
 - **Consecuencia:** una dependencia menos (`tenacity`). La guía `docs/guia_codigo.md`
   explica cada archivo.
+
+## 011 · Modo incremental con watermark y registro de reportados (2026-10-16)
+
+- **Decisión:** agregar `extract --incremental`: la ventana va desde el fin de la última
+  extracción completa (`data/state/watermark.json`) menos 30 min, sobre `updated_at`.
+  Un registro de pedidos reportados (`data/state/reportados.json`) evita repetirlos entre
+  reportes (`YA_REPORTADO`) y detecta los que cambiaron después (`CAMBIO_POST_REPORTE`).
+- **Motivo:** con una ventana relativa (`--days 1`) una tarea que corre unos minutos tarde,
+  o un día en que no corre, deja pedidos sin extraer; y las ventanas sobre `updated_at`
+  repiten pedidos en varios reportes.
+- **Consecuencia:** el estado vive en JSON reemplazado de forma atómica, no en SQLite,
+  porque `data/` se mantiene en Google Drive (decisión del equipo). Una sola máquina debe
+  ejecutar la tarea programada. El watermark solo avanza si la extracción cuadró.
+
+## 012 · Errores tipados, aislamiento por pedido y nuevos códigos de salida (2026-10-16)
+
+- **Decisión:** `ConfigError` (código 2) y `DataError` (código 4) reemplazan al `ValueError`
+  genérico; un error no previsto devuelve `5` y uno de archivo (Excel abierto, Drive
+  sincronizando) devuelve `1`. Cada pedido se transforma aislado: si falla, queda como
+  `ERROR_TRANSFORMACION` y los demás siguen. Con `--strict`, esos errores devuelven `4`.
+- **Motivo:** un solo pedido con un monto mal formado tumbaba el reporte completo y la
+  tarea programada lo reportaba como "error de configuración"; cualquier excepción no
+  prevista salía con `1` ("reintentar"), igual que un error de red.
+
+## 013 · Manifiesto como contrato y zona raw inmutable (2026-10-16)
+
+- **Decisión:** el manifiesto registra `fields`, `incremental` y `schema_version`, y se
+  escribe de forma atómica. `transform` lo valida: se detiene si la extracción se hizo con
+  `--fields` sin los campos críticos y avisa si el conteo no cuadró. Con `--fields`, la CLI
+  agrega siempre los campos que necesita el reporte (salvo `--solo-raw`). Una extracción
+  nunca sobrescribe otra con el mismo `run_id`.
+- **Motivo:** sin `test` ni `cancelled_at` (proyectados fuera con `--fields`), los pedidos
+  de prueba y cancelados pasaban al reporte en silencio.
+
+## 014 · CI y hooks de pre-commit (2026-10-16)
+
+- **Decisión:** agregar `.github/workflows/ci.yml` (ruff, pruebas en Windows y Linux con
+  Python 3.10 y 3.12, gitleaks sobre el historial) y `.pre-commit-config.yaml` (ruff,
+  gitleaks, llaves privadas, archivos de más de 500 KB).
+- **Motivo:** el README los mencionaba como controles de seguridad, pero no existían en el repo.
+
+## 015 · Descuento prorrateado en reembolsos parciales (2026-10-16)
+
+- **Decisión:** si `current_quantity` es menor que `quantity`, el descuento de la línea se
+  prorratea: `descuento × current_quantity / quantity`.
+- **Motivo:** Shopify calcula `discount_allocations` sobre la cantidad original. Restar el
+  descuento completo a menos unidades dejaba la línea subvaluada.
+
+## 016 · Bodega solo para pedidos que van al reporte (2026-10-16)
+
+- **Decisión:** por defecto, `fulfillment_orders.json` se consulta solo para pedidos pagados,
+  no cancelados ni de prueba y no reportados antes. `--bodega-todos` restaura el
+  comportamiento anterior. El manifiesto registra `bodegas_omitidas`.
+- **Motivo:** es la parte más lenta de la extracción (una llamada por pedido, ~2 por
+  segundo). Los pedidos excluidos no necesitan bodega; un contraentrega pendiente se
+  consultará en la corrida en que se confirme su pago.
+- **Consecuencia:** un JSONL crudo no trae bodega para los pedidos omitidos. Regenerarlo con
+  `transform --estados-pago todos` los mostrará con `BODEGA_NO_CONSULTADA`.
+
+## 017 · Fechas de `--since` / `--until` en hora Colombia (2026-10-16)
+
+- **Decisión:** una fecha sola (`2026-10-01`) es la medianoche en hora Colombia (UTC-5), no
+  en UTC. Una fecha con zona horaria explícita se respeta.
+- **Motivo:** "pedidos del 1 de octubre" debe ser el día de la tienda. En UTC la ventana
+  empezaba a las 19:00 del día anterior.
+
+## 018 · Segundo conteo antes de declarar un descuadre (2026-10-16)
+
+- **Decisión:** si lo extraído no coincide con el conteo inicial, se cuenta de nuevo al
+  final (`recount_count`). La extracción cuadra si el segundo conteo coincide con lo
+  extraído.
+- **Motivo:** con la ventana sobre `updated_at`, un pedido modificado durante la corrida
+  sale de la ventana y `--strict` fallaba (código 3) sin que se hubiera perdido nada; en
+  modo incremental eso además impedía avanzar el watermark. La ventana es fija, así que un
+  pedido solo puede salir de ella, nunca entrar; ese pedido entra en la corrida siguiente.

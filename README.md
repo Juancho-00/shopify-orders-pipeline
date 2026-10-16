@@ -42,9 +42,11 @@ shopify-orders-pipeline/
 │   │   ├── alertas.py       # Catálogo de alertas y exclusiones del log
 │   │   └── run.py           # JSONL crudo → CSV + Excel + log de alertas
 │   ├── sinks/
-│   │   ├── jsonl.py         # Escritura atómica a JSON Lines
+│   │   ├── atomic.py        # Escritura atómica compartida (temporal + renombrar)
+│   │   ├── jsonl.py         # JSON Lines (zona cruda)
 │   │   └── tabular.py       # CSV y Excel
 │   ├── extract.py           # Orquestación de la extracción + manifiesto de la corrida
+│   ├── state.py             # Estado entre corridas: watermark y pedidos ya reportados
 │   ├── reconciliation/      # Fase 2 (pendiente)
 │   └── erp/                 # Fase 3 (pendiente)
 ├── tests/                   # Pruebas sin red (Shopify simulado con `responses`)
@@ -135,7 +137,11 @@ pytest
 ## Fase 1: extracción de pedidos y reporte para Siesa
 
 ```powershell
-# Últimos 7 días: extrae, consulta bodegas y genera el reporte Siesa (default)
+# Tarea programada (recomendado): retoma desde la última extracción completa, sin huecos
+# ni pedidos repetidos entre reportes
+shopify-pipeline extract --incremental --strict
+
+# Últimos 7 días: extrae, consulta bodegas y genera el reporte Siesa
 shopify-pipeline extract
 
 # Pedidos de ayer en adelante, con el código real del ítem de envío en Siesa
@@ -144,17 +150,25 @@ shopify-pipeline extract --days 1 --codigo-envio FLETE01
 # Rehacer el reporte de la última extracción sin llamar a Shopify (p. ej. tras cambiar una regla)
 shopify-pipeline transform
 
-# Ventana explícita (fechas en UTC, o ISO con zona horaria)
+# Ventana explícita (una fecha sola es la medianoche en hora Colombia; o ISO con zona horaria)
 shopify-pipeline extract --since 2026-10-01 --until "2026-10-08T00:00:00-05:00"
 
-# Solo algunos campos (reduce el tamaño de la respuesta)
-shopify-pipeline extract --days 3 --fields name,created_at,financial_status,total_price,customer,line_items
+# Solo algunos campos (reduce el tamaño de la respuesta). Si se genera el reporte Siesa,
+# se agregan solos los campos que este necesita; con --solo-raw se respeta la lista tal cual.
+shopify-pipeline extract --days 3 --fields name,created_at,financial_status --solo-raw
 
 # Sin consultar bodegas (una llamada menos por pedido)
 shopify-pipeline extract --sin-bodega
 
-# Ventana sobre la fecha de última actualización (recomendado para la tarea programada)
+# Consultar la bodega de TODOS los pedidos (por defecto solo los que van al reporte)
+shopify-pipeline extract --bodega-todos
+
+# Ventana sobre la fecha de última actualización
 shopify-pipeline extract --days 2 --filtrar-por actualizacion
+
+# Reporte de revisión que incluye pedidos ya reportados en otras corridas
+# (genera pedidos_siesa_<run_id>_revision.*; no reemplaza el reporte oficial)
+shopify-pipeline transform --sin-ledger
 
 # Incluir pedidos cancelados o de prueba (se excluyen por defecto)
 shopify-pipeline extract --incluir-cancelados --incluir-pruebas
@@ -162,7 +176,7 @@ shopify-pipeline extract --incluir-cancelados --incluir-pruebas
 # Incluir pedidos sin pago confirmado (solo para revisión; no para cargar a Siesa)
 shopify-pipeline extract --estados-pago todos
 
-# Fallar (código 3) si el conteo no cuadra contra Shopify; útil en tareas programadas
+# Fallar si el conteo no cuadra (código 3) o si algún pedido no se pudo transformar (código 4)
 shopify-pipeline extract --days 1 --strict
 
 # Más detalle en el log
@@ -184,6 +198,15 @@ data/logs/alertas_20261013T161500Z.csv                      # alertas y pedidos 
 data/logs/shopify_pipeline_20261013.log                     # bitácora de todas las ejecuciones del día
 ```
 
+Y mantiene el estado entre corridas (no se borra; ver *Corridas incrementales*):
+
+```
+data/state/watermark.json      # hasta dónde llegó la última extracción completa (--incremental)
+data/state/reportados.json     # pedidos que ya salieron en un reporte Siesa
+```
+
+La zona raw es inmutable: una extracción nunca sobrescribe a otra.
+
 > Abre el **.xlsx** en Excel. El .csv usa punto decimal y Excel en español lo interpretaría mal.
 
 Manifiesto de la corrida:
@@ -199,15 +222,24 @@ Manifiesto de la corrida:
   "date_max": "2026-10-13T16:15:00+00:00",
   "expected_count": 128,
   "written_count": 128,
-  "bodegas_consultadas": 128,
+  "bodegas_consultadas": 97,
+  "bodegas_omitidas": 31,
   "duration_seconds": 64.2,
   "output_file": "20261013T161500Z.jsonl",
+  "fields": null,
+  "incremental": false,
+  "pipeline_version": "0.1.0",
+  "schema_version": 2,
+  "recount_count": null,
   "reconciled": true
 }
 ```
 
-El manifiesto es el contrato con la fase 2: indica qué ventana se extrajo y si el
-conteo cuadró contra `orders/count.json` de Shopify.
+El manifiesto es el contrato con las etapas siguientes: indica qué ventana se extrajo, si
+el conteo cuadró contra `orders/count.json` de Shopify y si se pidieron solo algunos campos
+(`fields`). `transform` lo valida antes de generar el reporte: si la extracción se hizo
+con `--fields` sin los campos críticos, se detiene (código 4) en lugar de producir un
+reporte incompleto; si el conteo no cuadró, lo advierte en la bitácora.
 
 ### Reporte para Siesa
 
@@ -232,6 +264,13 @@ Reglas clave:
 - **Envío:** solo genera línea si el valor cobrado es mayor a cero.
 - **Precios:** producto y envío van con IVA incluido, tal como los cobra Shopify.
 - **Control de totales:** la suma de las líneas debe ser igual al total del pedido en Shopify.
+- **Reembolso parcial:** si se reembolsaron unidades de una línea, la cantidad es la vigente
+  (`current_quantity`) y el descuento se prorratea a esa cantidad.
+- **Sin duplicados entre reportes:** un pedido que ya salió en el reporte de otra corrida
+  queda como `YA_REPORTADO`; si su total cambió desde entonces, como `CAMBIO_POST_REPORTE`
+  (revisar a mano en Siesa).
+- **Un pedido malo no detiene el lote:** si un pedido trae un dato que no se puede procesar,
+  queda como `ERROR_TRANSFORMACION` en el log y los demás siguen.
 
 ### Log de alertas
 
@@ -243,33 +282,49 @@ con una fila por evento, sin datos personales del cliente:
 | ALERTA | NIT_POR_VERIFICAR | #1010 | | |
 | ALERTA | SIN_SKU | #1011 | 2 | |
 | EXCLUIDO | PAGO_NO_CONFIRMADO | #1012 | | estado_pago=pending |
+| EXCLUIDO | YA_REPORTADO | #1006 | | run=20261013T161500Z |
+| EXCLUIDO | ERROR_TRANSFORMACION | #1013 | | ValueError: Monto inválido: 'abc' |
 
 Revisa este archivo antes de cargar a Siesa. La lista completa de códigos está en
 [`docs/mapeo_siesa.md`](docs/mapeo_siesa.md#log-de-alertas).
 
-### Pedidos que se pagan días después (contraentrega)
-
-Por defecto la ventana se aplica sobre la **fecha de creación**. Un pedido contraentrega
-creado el lunes y pagado el jueves se lee el lunes como `pending` (queda excluido) y la
-extracción del jueves ya no lo incluye. Para la ejecución programada usa:
+### Corridas incrementales (tarea programada)
 
 ```powershell
-shopify-pipeline extract --days 2 --filtrar-por actualizacion
+shopify-pipeline extract --incremental --strict
 ```
 
-Así la ventana se aplica sobre la **última modificación**: cuando se registra el pago, el
-pedido se actualiza y entra en la corrida de ese día. Un mismo pedido puede volver a
-aparecer si se modifica después (por ejemplo, al despacharlo); la conciliación de la fase 2
-evitará cargarlo dos veces en Siesa.
+Una ventana relativa (`--days 1`) depende de la hora exacta en que corre la tarea: si hoy
+corre 5 minutos más tarde que ayer, esos 5 minutos quedan sin extraer, y si el equipo
+estuvo apagado un día, ese día se pierde. `--incremental` lo evita:
+
+1. **Watermark:** la ventana va desde el fin de la última extracción **completa**
+   (`data/state/watermark.json`) menos 30 minutos de solape, hasta ahora. La primera vez
+   toma los últimos 7 días. Si una corrida falla o no cuadra, el watermark no avanza y la
+   siguiente cubre de nuevo ese periodo.
+2. **Fecha de actualización:** la ventana se aplica sobre `updated_at`. Un pedido
+   contraentrega creado el lunes (`pending`, excluido) y pagado el jueves entra en la
+   corrida del jueves, porque registrar el pago actualiza el pedido.
+3. **Ledger:** como las ventanas se solapan, un mismo pedido llega varias veces (también
+   al despacharlo o editarlo). `data/state/reportados.json` recuerda qué pedidos ya
+   salieron en un reporte: los repetidos quedan como `YA_REPORTADO` y no se duplican en
+   Siesa. `transform` sobre la misma corrida sí los vuelve a incluir (para rehacer un
+   reporte tras cambiar una regla).
+
+> **Una sola máquina** debe ejecutar la tarea programada. `data/` está en Google Drive: si
+> dos equipos escriben el estado al mismo tiempo, Drive crea copias en conflicto
+> (`reportados (1).json`) y el registro de pedidos reportados deja de ser confiable.
 
 ### Códigos de salida
 
 | Código | Significado | Acción |
 |---|---|---|
 | `0` | Éxito | — |
-| `1` | Error transitorio (red, 5xx, 429) tras agotar reintentos | Reintentar más tarde |
-| `2` | Configuración o credenciales (401, 403, 404, `.env` incompleto) | Corregir configuración; reintentar no sirve |
-| `3` | Extracción completa, pero el conteo no cuadra (`--strict`) | Revisar antes de conciliar |
+| `1` | Error transitorio (red, 5xx, 429) tras agotar reintentos, o archivo bloqueado (abierto en Excel, sincronizando en Drive) | Reintentar más tarde |
+| `2` | Configuración o argumentos (401, 403, 404, `.env` incompleto, ventana inválida) | Corregir configuración; reintentar no sirve |
+| `3` | Extracción completa, pero el conteo no cuadra ni tras un segundo conteo (`--strict`) | Revisar antes de conciliar |
+| `4` | Error de datos: JSONL o estado dañado, extracción con campos insuficientes o, con `--strict`, pedidos que no se pudieron transformar | Revisar el log de alertas y la bitácora |
+| `5` | Error inesperado (posible bug); la traza completa queda en la bitácora | Reportar; reintentar no sirve |
 
 ### Cómo funciona
 
@@ -287,9 +342,22 @@ evitará cargarlo dos veces en Siesa.
   (`--filtrar-por`), `limit=250` (el máximo) y proyección opcional con `fields`.
 - **Bodega:** el pedido no trae la bodega por línea; se consulta
   `orders/{id}/fulfillment_orders.json` (una llamada por pedido, con el mismo control de
-  rate limit). Si falta el permiso, la extracción continúa y marca `BODEGA_NO_CONSULTADA`.
-- **Escritura atómica:** se escribe a un temporal y se renombra al final; si algo falla,
-  no queda un archivo a medias.
+  rate limit). Solo se consulta para los pedidos que van a salir en el reporte (pagados, no
+  cancelados ni de prueba, no reportados antes): los pendientes de pago no gastan llamada y
+  se consultan en la corrida en que se confirme su pago. `bodegas_omitidas` en el
+  manifiesto cuenta las llamadas ahorradas; `--bodega-todos` desactiva el filtro. Si falta
+  el permiso, la extracción continúa y marca `BODEGA_NO_CONSULTADA`.
+- **Conteo:** si lo extraído no coincide con `orders/count.json`, se cuenta otra vez al
+  final. Como la ventana quedó fija al iniciar, un pedido solo puede *salir* de ella
+  durante la corrida (se modificó y su `updated_at` pasó del límite, o se eliminó). Si el
+  segundo conteo coincide con lo extraído, la diferencia queda explicada (`recount_count`
+  en el manifiesto) y la próxima corrida recoge esos pedidos; si no coincide, la
+  extracción se marca como descuadrada.
+- **Escritura atómica:** todo (JSONL, CSV, Excel, manifiesto y estado) se escribe a un
+  temporal y se renombra al final; si algo falla, no queda un archivo a medias.
+- **Aislamiento por pedido:** un pedido con datos inesperados se excluye con
+  `ERROR_TRANSFORMACION` y la corrida continúa. Un 404 al consultar la bodega de un pedido
+  tampoco detiene la extracción.
 
 > **Nota sobre la API:** la REST Admin API es *legacy* desde octubre de 2024 (solo recibe
 > correcciones de seguridad). Funciona para apps propias como esta, pero la evolución
@@ -306,7 +374,8 @@ es `documento_referencia` (consecutivo de Shopify, p. ej. `1006`).
 
 Diseño previsto (`src/shopify_pipeline/reconciliation/`):
 
-1. Leer la última extracción de `data/raw/shopify/orders/` usando su manifiesto.
+1. Leer la última extracción de `data/raw/shopify/orders/` usando su manifiesto, y el
+   registro de pedidos ya reportados (`data/state/reportados.json`).
 2. Consultar en Siesa los pedidos de la misma ventana de fechas.
 3. Cruzar por la llave acordada (p. ej. `order.name` `#1001` o `order.id` de Shopify
    contra el campo de referencia externa de Siesa).
@@ -361,11 +430,19 @@ paginación, 429, 5xx, 401/403/404, renovación de token y bodegas. La transform
 prueba con el pedido real #1006 **anonimizado** (`tests/fixtures/order_1006.json`): nunca
 guardes en el repo pedidos con datos reales de clientes.
 
+**Integración continua** (`.github/workflows/ci.yml`): en cada push a `main` y en cada pull
+request corre `ruff check`, `ruff format --check`, las pruebas en Windows y Linux con
+Python 3.10 y 3.12, y `gitleaks` sobre todo el historial.
+
+**Hooks locales** (`.pre-commit-config.yaml`, se activan con `pre-commit install`): ruff,
+gitleaks, detección de llaves privadas y bloqueo de archivos de más de 500 KB (evita subir
+por error un JSONL o Excel con datos de clientes).
+
 ## Seguridad
 
 - Los secretos solo viven en `.env` (local) o en el gestor de secretos del entorno de ejecución.
 - `.env`, `data/` y las plantillas reales del ERP están en `.gitignore`.
-- `gitleaks` en pre-commit bloquea commits que contengan tokens.
+- `gitleaks` bloquea commits con tokens (hook de pre-commit) y revisa el historial en CI.
 - Los secretos nunca aparecen en logs ni en `repr()` de los objetos.
 - Usa scopes de solo lectura y renueva credenciales si alguien que tuvo acceso deja el equipo.
 - `data/` contiene datos personales de clientes (nombres, correos, direcciones). Esta carpeta
