@@ -1,15 +1,9 @@
 """
-Fase 2 (pendiente): conciliación de pedidos Shopify vs. ERP.
+Fase 2: conciliación de pedidos Shopify vs. Siesa.
 
-Alcance previsto:
-    * Leer la última extracción de ``data/raw/shopify/orders`` (usando su manifiesto).
-    * Consultar en el ERP los pedidos de la misma ventana.
-    * Cruzar por la llave acordada (p. ej. ``order.name`` / ``order.id`` de Shopify
-      contra el campo de referencia externa del ERP).
-    * Clasificar: en ambos / solo en Shopify (faltantes en ERP) / solo en ERP /
-      con diferencias (totales, estado, cliente).
-    * Generar el reporte de conciliación en ``data/reconciliation/``.
+    siesa_export.py  lee el exporte de pedidos de Siesa (Excel/CSV) y saca las referencias
+    run.py           cruza los reportes de la fase 1 contra el exporte y escribe el resultado
 
-Información necesaria para implementarla: tipo de ERP y forma de acceso
-(API, base de datos, archivo), y el campo del ERP que guarda la referencia de Shopify.
+Llave del cruce: ``documento_referencia`` del reporte (número de pedido Shopify sin ``#``)
+contra ``_num_docto_referencia`` de Siesa (reglas R-20 a R-22).
 """

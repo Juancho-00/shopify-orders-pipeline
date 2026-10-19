@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 
 import pytest
 from openpyxl import load_workbook
@@ -35,8 +36,8 @@ def test_run_transform_escribe_csv_y_xlsx(raw_file, tmp_path):
     assert run.csv_file.name == "pedidos_siesa_20261014T150000Z.csv"
     rows = _read_csv(run.csv_file)
     assert list(rows[0]) == list(COLUMNS)
-    assert [r["referencia"] for r in rows] == ["KITK0108", "ENVIO"]
-    assert rows[1]["precio_unitario"] == "12294.34"
+    assert [r["referencia"] for r in rows] == ["KITK0108", "SERV01"]
+    assert rows[1]["precio_unitario"] == "12294"  # pesos enteros
 
     ws = load_workbook(run.xlsx_file).active
     header = [c.value for c in ws[1]]
@@ -46,6 +47,7 @@ def test_run_transform_escribe_csv_y_xlsx(raw_file, tmp_path):
 
 
 def test_run_transform_escribe_log_de_alertas(raw_file, tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="shopify_pipeline")
     run = run_transform(raw_file, tmp_path / "out", log_dir=tmp_path / "logs")
 
     assert run.alertas_file == tmp_path / "logs" / "alertas_20261014T150000Z.csv"

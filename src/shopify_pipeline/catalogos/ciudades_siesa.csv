@@ -1,0 +1,1111 @@
+codigo,descripcion
+169,Colombia
+16905,Antioquia
+16905001,Medellín
+16905002,Abejorral
+16905004,Abriaquí
+16905021,Alejandría
+16905030,Amagá
+16905031,Amalfi
+16905034,Andes
+16905036,Angelópolis
+16905038,Angostura
+16905040,Anorí
+16905042,Santa Fé De Antioquia
+16905044,Anzá
+16905045,Apartadó
+16905051,Arboletes
+16905055,Argelia
+16905059,Armenia
+16905079,Barbosa
+16905086,Belmira
+16905088,Bello
+16905090,DIBULLA
+16905091,Betania
+16905093,Betulia
+16905101,Ciudad Bolívar
+16905107,Briceño
+16905113,Buriticá
+16905120,Cáceres
+16905125,Caicedo
+16905129,Caldas
+16905134,Campamento
+16905138,Cañasgordas
+16905142,Caracolí
+16905145,Caramanta
+16905147,Carepa
+16905148,El Carmen De Viboral
+16905150,Carolina
+16905154,Caucasia
+16905172,Chigorodó
+16905190,Cisneros
+16905197,Cocorná
+16905206,Concepción
+16905209,Concordia
+16905212,Copacabana
+16905234,Dabeiba
+16905237,Donmatías
+16905240,Ebéjico
+16905250,El Bagre
+16905264,Entrerríos
+16905266,Envigado
+16905282,Fredonia
+16905284,Frontino
+16905306,Giraldo
+16905308,Girardota
+16905310,Gómez Plata
+16905313,Granada
+16905315,Guadalupe
+16905318,Guarne
+16905321,Guatapé
+16905347,Heliconia
+16905353,Hispania
+16905360,Itagüí
+16905361,Ituango
+16905364,Jardín
+16905368,Jericó
+16905376,La Ceja
+16905380,La Estrella
+16905390,LA PINTADA
+16905400,La Unión
+16905411,Liborina
+16905425,Maceo
+16905428,CAUCHERAS (05)
+16905440,Marinilla
+16905467,Montebello
+16905475,Murindó
+16905480,Mutatá
+16905483,Nariño
+16905490,Necoclí
+16905495,Nechí
+16905501,Olaya
+16905541,Peñol
+16905543,Peque
+16905576,Pueblorrico
+16905579,Puerto Berrío
+16905585,Puerto Nare
+16905591,Puerto Triunfo
+16905604,Remedios
+16905607,Retiro
+16905615,Rionegro
+16905628,Sabanalarga
+16905631,Sabaneta
+16905642,Salgar
+16905647,San Andrés De Cuerquía
+16905649,San Carlos
+16905652,San Francisco
+16905656,San Jerónimo
+16905658,San José De La Montaña
+16905659,San Juan De Urabá
+16905660,SAN LUIS
+16905664,San Pedro De Los Milagros
+16905665,San Pedro De Urabá
+16905667,San Rafael
+16905670,San Roque
+16905674,San Vicente Ferrer
+16905679,Santa Bárbara
+16905686,Santa Rosa De Osos
+16905690,Santo Domingo
+16905697,El Santuario
+16905736,Segovia
+16905756,Sonsón
+16905761,Sopetrán
+16905789,Támesis
+16905790,Tarazá
+16905792,Tarso
+16905809,Titiribí
+16905819,Toledo
+16905837,Turbo
+16905842,Uramita
+16905847,Urrao
+16905854,Valdivia
+16905856,Valparaíso
+16905858,Vegachí
+16905861,Venecia
+16905873,Vigía Del Fuerte
+16905885,Yalí
+16905887,Yarumal
+16905890,Yolombó
+16905893,Yondó
+16905895,Zaragoza
+16908,Atlántico
+16908001,Barranquilla
+16908078,Baranoa
+16908137,Campo De La Cruz
+16908141,Candelaria
+16908296,Galapa
+16908372,Juan De Acosta
+16908421,Luruaco
+16908433,Malambo
+16908436,Manatí
+16908520,Palmar De Varela
+16908549,Piojó
+16908558,Polonuevo
+16908560,Ponedera
+16908573,Puerto Colombia
+16908606,Repelón
+16908634,Sabanagrande
+16908638,Sabanalarga
+16908675,Santa Lucía
+16908685,Santo Tomás
+16908758,Soledad
+16908770,Suan
+16908832,Tubará
+16908849,Usiacurí
+16911,Bogotá
+16911001,"Bogotá, D.C."
+16913,Bolívar
+16913001,Cartagena De Indias
+16913006,Achí
+16913030,ALTOS DEL ROSARIO
+16913052,Arjona
+16913074,Barranco De Loba
+16913140,Calamar
+16913188,Cicuco
+16913212,Córdoba
+16913244,El Carmen De Bolívar
+16913248,El Guamo
+16913430,Magangué
+16913433,Mahates
+16913440,Margarita
+16913442,María La Baja
+16913468,Mompós
+16913473,Morales
+16913549,Pinillos
+16913600,Río Viejo
+16913647,San Estanislao
+16913650,San Fernando
+16913654,San Jacinto
+16913657,San Juan Nepomuceno
+16913667,San Martín De Loba
+16913670,San Pablo Sur
+16913673,Santa Catalina
+16913683,Santa Rosa De Lima
+16913688,Santa Rosa Del Sur
+16913744,Simití
+16913760,Soplaviento
+16913780,Talaigua Nuevo
+16913836,Turbaco
+16913838,Turbaná
+16913873,Villanueva
+16913894,Zambrano
+16915,Boyacá
+16915001,Tunja
+16915022,Almeida
+16915047,Aquitania
+16915051,Arcabuco
+16915087,Belén
+16915090,Berbeo
+16915092,Betéitiva
+16915097,Boavita
+16915104,Boyacá
+16915106,Briceño
+16915109,Buenavista
+16915114,Busbanzá
+16915131,Caldas
+16915135,Campohermoso
+16915162,Cerinza
+16915172,Chinavita
+16915176,Chiquinquirá
+16915180,Chiscas
+16915183,Chita
+16915185,Chitaraque
+16915187,Chivatá
+16915189,Ciénega
+16915204,Cómbita
+16915212,Coper
+16915215,Corrales
+16915218,Covarachía
+16915223,Cubará
+16915224,Cucaita
+16915226,Cuítiva
+16915232,Chíquiza
+16915236,Chivor
+16915238,Duitama
+16915244,El Cocuy
+16915248,El Espino
+16915272,Firavitoba
+16915276,Floresta
+16915293,Gachantivá
+16915296,Gámeza
+16915299,Garagoa
+16915317,Guacamayas
+16915322,Guateque
+16915325,Guayatá
+16915332,Güicán De La Sierra
+16915362,Iza
+16915367,Jenesano
+16915368,Jericó
+16915377,Labranzagrande
+16915380,La Capilla
+16915401,La Victoria
+16915403,La Uvita
+16915407,Villa De Leyva
+16915425,Macanal
+16915442,Maripí
+16915455,Miraflores
+16915464,Mongua
+16915466,Monguí
+16915469,Moniquirá
+16915476,Motavita
+16915480,Muzo
+16915491,Nobsa
+16915494,Nuevo Colón
+16915500,Oicatá
+16915507,Otanche
+16915511,Pachavita
+16915514,Páez
+16915516,Paipa
+16915518,Pajarito
+16915522,Panqueba
+16915531,Pauna
+16915533,Paya
+16915537,Paz De Río
+16915542,Pesca
+16915550,Pisba
+16915572,Puerto Boyacá
+16915580,Quípama
+16915599,Ramiriquí
+16915600,Ráquira
+16915621,Rondón
+16915632,Saboyá
+16915638,Sáchica
+16915646,Samacá
+16915660,San Eduardo
+16915664,San José De Pare
+16915667,San Luis De Gaceno
+16915673,San Mateo
+16915676,San Miguel De Sema
+16915681,San Pablo De Borbur
+16915686,Santana
+16915690,Santa María
+16915693,Santa Rosa De Viterbo
+16915696,Santa Sofía
+16915720,Sativanorte
+16915723,Sativasur
+16915740,Siachoque
+16915753,Soatá
+16915755,Socotá
+16915757,Socha
+16915759,Sogamoso
+16915761,Somondoco
+16915762,Sora
+16915763,Sotaquirá
+16915764,Soracá
+16915774,Susacón
+16915776,Sutamarchán
+16915778,Sutatenza
+16915790,Tasco
+16915798,Tenza
+16915804,Tibaná
+16915806,Tibasosa
+16915808,Tinjacá
+16915810,Tipacoque
+16915814,Toca
+16915816,Togüí
+16915820,Tópaga
+16915822,Tota
+16915832,Tununguá
+16915835,Turmequé
+16915837,Tuta
+16915839,Tutazá
+16915842,Úmbita
+16915861,Ventaquemada
+16915879,Viracachá
+16915897,Zetaquira
+16917,Caldas
+16917001,Manizales
+16917013,Aguadas
+16917042,Anserma
+16917050,Aranzazu
+16917088,Belalcázar
+16917174,Chinchiná
+16917272,Filadelfia
+16917380,La Dorada
+16917388,La Merced
+16917433,Manzanares
+16917442,Marmato
+16917444,Marquetalia
+16917446,Marulanda
+16917486,Neira
+16917495,Norcasia
+16917513,Pácora
+16917524,Palestina
+16917541,Pensilvania
+16917614,Riosucio
+16917616,Risaralda
+16917653,Salamina
+16917662,Samaná
+16917665,San Jose
+16917777,Supía
+16917867,Victoria
+16917873,Villamaría
+16917877,Viterbo
+16918,Caquetá
+16918001,Florencia
+16918029,Albania
+16918094,Belén De Los Andaquíes
+16918150,Cartagena Del Chairá
+16918205,Curillo
+16918247,El Doncello
+16918256,El Paujíl
+16918410,La Montañita
+16918460,Milán
+16918479,Morelia
+16918592,Puerto Rico
+16918610,San José Del Fragua
+16918753,San Vicente Del Caguán
+16918765,SOLANO
+16918860,Valparaíso
+16919,Cauca
+16919001,Popayán
+16919022,Almaguer
+16919050,Argelia
+16919075,Balboa
+16919100,Bolívar
+16919110,Buenos Aires
+16919130,Cajibío
+16919137,Caldono
+16919142,Caloto
+16919212,Corinto
+16919256,El Tambo
+16919290,Florencia
+16919318,Guapí
+16919355,Inzá
+16919364,Jambaló
+16919392,La Sierra
+16919397,La Vega
+16919418,López De Micay
+16919450,Mercaderes
+16919455,Miranda
+16919473,Morales
+16919513,Padilla
+16919517,Páez
+16919532,Patía
+16919548,Piendamó - Tunía
+16919573,Puerto Tejada
+16919585,Puracé
+16919622,Rosas
+16919693,San Sebastián
+16919698,Santander De Quilichao
+16919701,Santa Rosa
+16919743,Silvia
+16919760,Sotara
+16919780,Suárez
+16919807,Timbío
+16919809,Timbiquí
+16919821,Toribío
+16919824,Totoró
+16919845,Villa Rica
+16920,Cesar
+16920001,Valledupar
+16920011,Aguachica
+16920013,Agustín Codazzi
+16920032,Astrea
+16920045,Becerril
+16920060,Bosconia
+16920175,Chimichagua
+16920178,Chiriguaná
+16920228,Curumaní
+16920238,El Copey
+16920250,El Paso
+16920295,Gamarra
+16920310,González
+16920383,La Gloria
+16920400,La Jagua De Ibirico
+16920443,Manaure Balcón Del Cesar
+16920517,Pailitas
+16920550,Pelaya
+16920614,Río De Oro
+16920621,La Paz
+16920710,San Alberto
+16920750,San Diego
+16920770,San Martín
+16920787,Tamalameque
+16923,Córdoba
+16923001,Montería
+16923068,Ayapel
+16923079,Buenavista
+16923090,Canalete
+16923162,Cereté
+16923168,Chimá
+16923182,Chinú
+16923189,Ciénaga De Oro
+16923300,Cotorra
+16923350,La Apartada
+16923417,Lorica
+16923419,Los Córdobas
+16923464,Momil
+16923466,Montelíbano
+16923500,Moñitos
+16923555,Planeta Rica
+16923570,Pueblo Nuevo
+16923574,Puerto Escondido
+16923580,Puerto Libertador
+16923586,Purísima De La Concepción
+16923660,Sahagún
+16923670,San Andrés De Sotavento
+16923672,San Antero
+16923675,San Bernardo Del Viento
+16923678,San Carlos
+16923682,SAN JOSE DE URE (23)
+16923686,San Pelayo
+16923807,Tierralta
+16923855,Valencia
+16925,Cundinamarca
+16925001,Agua De Dios
+16925019,Albán
+16925035,Anapoima
+16925040,Anolaima
+16925053,Arbeláez
+16925086,Beltrán
+16925095,Bituima
+16925099,Bojacá
+16925120,Cabrera
+16925123,Cachipay
+16925126,Cajicá
+16925148,Caparrapí
+16925151,Cáqueza
+16925154,Carmen De Carupa
+16925168,Chaguaní
+16925175,Chía
+16925178,Chipaque
+16925181,Choachí
+16925183,Chocontá
+16925200,Cogua
+16925214,Cota
+16925224,Cucunubá
+16925245,El Colegio
+16925258,El Peñón
+16925260,EL ROSAL (25260)
+16925269,Facatativá
+16925279,Fómeque
+16925281,Fosca
+16925286,Funza
+16925288,Fúquene
+16925290,Fusagasugá
+16925293,Gachalá
+16925295,Gachancipá
+16925297,Gachetá
+16925299,Gama
+16925307,Girardot
+16925312,Granada
+16925317,Guachetá
+16925320,Guaduas
+16925322,Guasca
+16925324,Guataquí
+16925326,Guatavita
+16925328,Guayabal De Síquima
+16925335,Guayabetal
+16925339,Gutiérrez
+16925368,Jerusalén
+16925372,Junín
+16925377,La Calera
+16925386,La Mesa
+16925394,La Palma
+16925398,La Peña
+16925402,La Vega
+16925407,Lenguazaque
+16925426,Machetá
+16925430,Madrid
+16925436,Manta
+16925438,Medina
+16925473,Mosquera
+16925483,Nariño
+16925486,Nemocón
+16925488,Nilo
+16925489,Nimaima
+16925491,Nocaima
+16925506,Venecia
+16925513,Pacho
+16925518,Paime
+16925524,Pandi
+16925530,Paratebueno
+16925535,Pasca
+16925572,Puerto Salgar
+16925580,Pulí
+16925592,Quebradanegra
+16925594,Quetame
+16925596,Quipile
+16925599,Apulo
+16925612,Ricaurte
+16925645,San Antonio Del Tequendama
+16925649,San Bernardo
+16925653,San Cayetano
+16925658,San Francisco
+16925662,San Juan De Rioseco
+16925718,Sasaima
+16925736,Sesquilé
+16925740,Sibaté
+16925743,Silvania
+16925745,Simijaca
+16925754,Soacha
+16925758,Sopó
+16925769,Subachoque
+16925772,Suesca
+16925777,Supatá
+16925779,Susa
+16925781,Sutatausa
+16925785,Tabio
+16925793,Tausa
+16925797,Tena
+16925799,Tenjo
+16925805,Tibacuy
+16925807,Tibirita
+16925815,Tocaima
+16925817,Tocancipá
+16925823,Topaipí
+16925839,Ubalá
+16925841,Ubaque
+16925843,Villa De San Diego De Ubaté
+16925845,Une
+16925851,Útica
+16925862,Vergara
+16925867,Vianí
+16925871,Villagómez
+16925873,Villapinzón
+16925875,Villeta
+16925878,Viotá
+16925885,Yacopí
+16925898,Zipacón
+16925899,Zipaquirá
+16927,Chocó
+16927001,Quibdó
+16927006,Acandí
+16927025,Alto Baudó
+16927073,Bagadó
+16927075,Bahía Solano
+16927077,Bajo Baudó
+16927099,Bojayá
+16927160,CERTEGUI
+16927205,Condoto
+16927245,El Carmen De Atrato
+16927250,El Litoral Del San Juan
+16927361,Istmina
+16927372,Juradó
+16927413,Lloró
+16927491,Nóvita
+16927495,Nuquí
+16927615,Riosucio
+16927660,San José Del Palmar
+16927745,Sipí
+16927787,Tadó
+16927800,Unguía
+16941,Huila
+16941001,Neiva
+16941006,Acevedo
+16941013,Agrado
+16941016,Aipe
+16941020,Algeciras
+16941026,Altamira
+16941078,Baraya
+16941132,Campoalegre
+16941206,Colombia
+16941244,Elías
+16941298,Garzón
+16941306,Gigante
+16941319,Guadalupe
+16941349,Hobo
+16941357,Íquira
+16941359,Isnos
+16941378,La Argentina
+16941396,La Plata
+16941483,Nátaga
+16941503,Oporapa
+16941518,Paicol
+16941524,Palermo
+16941530,Palestina
+16941548,Pital
+16941551,Pitalito
+16941615,Rivera
+16941660,Saladoblanco
+16941668,San Agustín
+16941676,Santa María
+16941770,Suaza
+16941791,Tarqui
+16941797,Tesalia
+16941799,Tello
+16941801,Teruel
+16941807,Timaná
+16941872,Villavieja
+16941885,Yaguará
+16944,La Guajira
+16944001,Riohacha
+16944035,Albania
+16944078,Barrancas
+16944090,DIBULLA
+16944110,El Molino
+16944279,Fonseca
+16944378,HATONUEVO
+16944430,Maicao
+16944560,Manaure
+16944650,San Juan Del Cesar
+16944847,Uribia
+16944855,Urumita
+16944874,Villanueva
+16947,Magdalena
+16947001,Santa Marta
+16947053,Aracataca
+16947058,Ariguaní
+16947161,Cerro De San Antonio
+16947170,Chibolo
+16947189,Ciénaga
+16947245,El Banco
+16947258,El Piñón
+16947288,Fundación
+16947318,Guamal
+16947541,Pedraza
+16947551,Pivijay
+16947555,Plato
+16947570,Puebloviejo
+16947605,Remolino
+16947675,Salamina
+16947692,San Sebastián De Buenavista
+16947703,San Zenón
+16947707,Santa Ana
+16947745,Sitionuevo
+16947798,Tenerife
+16947980,Zona Bananera
+16950,Meta
+16950001,Villavicencio
+16950006,Acacías
+16950110,Barranca De Upía
+16950124,Cabuyaro
+16950150,Castilla La Nueva
+16950223,Cubarral
+16950226,Cumaral
+16950245,El Calvario
+16950251,El Castillo
+16950270,El Dorado
+16950287,Fuentedeoro
+16950313,Granada
+16950318,Guamal
+16950325,Mapiripán
+16950330,Mesetas
+16950350,La Macarena
+16950370,Uribe
+16950400,Lejanías
+16950450,Puerto Concordia
+16950568,Puerto Gaitán
+16950573,Puerto López
+16950577,Puerto Lleras
+16950590,Puerto Rico
+16950606,Restrepo
+16950680,San Carlos De Guaroa
+16950683,San Juan De Arama
+16950686,San Juanito
+16950689,San Martín De Los Llanos
+16950711,Vistahermosa
+16952,Nariño
+16952001,Pasto
+16952019,Albán
+16952022,Aldana
+16952036,Ancuyá
+16952051,Arboleda
+16952079,Barbacoas
+16952083,Belén
+16952110,Buesaco
+16952203,Colón
+16952207,Consacá
+16952210,Contadero
+16952215,Córdoba
+16952224,Cuaspúd
+16952227,Cumbal
+16952233,Cumbitara
+16952240,Chachagüí
+16952250,El Charco
+16952254,EL PENOL
+16952256,El Rosario
+16952258,El Tablón De Gómez
+16952260,El Tambo
+16952287,Funes
+16952317,Guachucal
+16952320,Guaitarilla
+16952323,Gualmatán
+16952352,Iles
+16952354,Imués
+16952356,Ipiales
+16952378,La Cruz
+16952381,La Florida
+16952385,La Llanada
+16952390,La Tola
+16952399,La Unión
+16952405,Leiva
+16952411,Linares
+16952418,Los Andes
+16952427,Magüí
+16952435,Mallama
+16952473,Mosquera
+16952490,Olaya Herrera
+16952506,Ospina
+16952520,Francisco Pizarro
+16952540,Policarpa
+16952560,Potosí
+16952565,Providencia
+16952573,Puerres
+16952585,Pupiales
+16952612,Ricaurte
+16952621,Roberto Payán
+16952678,Samaniego
+16952683,Sandoná
+16952685,San Bernardo
+16952687,San Lorenzo
+16952693,San Pablo
+16952694,San Pedro De Cartago
+16952696,Santa Bárbara
+16952699,Santacruz
+16952720,Sapuyes
+16952786,Taminango
+16952788,Tangua
+16952835,San Andrés De Tumaco
+16952838,Túquerres
+16952885,Yacuanquer
+16954,Norte de Santander
+16954001,Cúcuta
+16954003,Ábrego
+16954051,Arboledas
+16954099,Bochalema
+16954109,Bucarasica
+16954125,Cácota De Velasco
+16954128,Cáchira
+16954172,Chinácota
+16954174,Chitagá
+16954206,Convención
+16954223,Cucutilla
+16954239,Durania
+16954245,El Carmen
+16954250,El Tarra
+16954261,El Zulia
+16954313,Gramalote
+16954344,Hacarí
+16954347,Herrán
+16954377,Labateca
+16954385,La Esperanza
+16954398,La Playa De Belén
+16954405,Los Patios
+16954418,Lourdes
+16954480,Mutiscua
+16954498,Ocaña
+16954518,Pamplona
+16954520,Pamplonita
+16954553,Puerto Santander
+16954599,Ragonvalia
+16954660,Salazar De Las Palmas
+16954670,San Calixto
+16954673,San Cayetano
+16954680,Santiago
+16954720,Sardinata
+16954743,Santo Domingo De Silos
+16954800,Teorama
+16954810,Tibú
+16954820,Toledo
+16954871,Villa Caro
+16954874,Villa Del Rosario
+16963,Quindío
+16963001,Armenia
+16963111,Buenavista
+16963130,Calarcá
+16963190,Circasia
+16963212,Córdoba
+16963272,Filandia
+16963302,Génova
+16963401,La Tebaida
+16963470,Montenegro
+16963548,Pijao
+16963594,Quimbaya
+16963690,Salento
+16966,Risaralda
+16966001,Pereira
+16966045,Apía
+16966075,Balboa
+16966088,Belén De Umbría
+16966170,Dosquebradas
+16966318,Guática
+16966383,La Celia
+16966400,La Virginia
+16966440,Marsella
+16966456,Mistrató
+16966572,Pueblo Rico
+16966594,Quinchía
+16966682,Santa Rosa De Cabal
+16966687,Santuario
+16968,Santander
+16968001,Bucaramanga
+16968013,Aguada
+16968020,Albania
+16968051,Aratoca
+16968077,Barbosa
+16968079,Barichara
+16968081,Barrancabermeja
+16968092,Betulia
+16968101,Bolívar
+16968121,Cabrera
+16968132,California
+16968147,Capitanejo
+16968152,Carcasí
+16968160,Cepitá
+16968162,Cerrito
+16968167,Charalá
+16968169,Charta
+16968176,Chima
+16968179,Chipatá
+16968190,Cimitarra
+16968207,Concepción
+16968209,Confines
+16968211,Contratación
+16968217,Coromoro
+16968229,Curití
+16968235,El Carmen De Chucurí
+16968245,El Guacamayo
+16968250,El Peñón
+16968255,El Playón
+16968264,Encino
+16968266,Enciso
+16968271,Florián
+16968276,Floridablanca
+16968296,Galán
+16968298,Gámbita
+16968307,Girón
+16968318,Guaca
+16968320,Guadalupe
+16968322,Guapotá
+16968324,Guavatá
+16968327,Güepsa
+16968344,Hato
+16968368,Jesús María
+16968370,Jordán
+16968377,La Belleza
+16968385,Landázuri
+16968397,La Paz
+16968406,Lebrija
+16968418,Los Santos
+16968425,Macaravita
+16968432,Málaga
+16968444,Matanza
+16968464,Mogotes
+16968468,Molagavita
+16968498,Ocamonte
+16968500,Oiba
+16968502,Onzaga
+16968522,Palmar
+16968524,Palmas Del Socorro
+16968533,Páramo
+16968547,Piedecuesta
+16968549,Pinchote
+16968572,Puente Nacional
+16968573,Puerto Parra
+16968575,Puerto Wilches
+16968615,Rionegro
+16968655,Sabana De Torres
+16968669,San Andrés
+16968673,San Benito
+16968679,San Gil
+16968682,San Joaquín
+16968684,San José De Miranda
+16968686,San Miguel
+16968689,San Vicente De Chucurí
+16968705,Santa Bárbara
+16968720,Santa Helena Del Opón
+16968745,Simacota
+16968755,Socorro
+16968770,Suaita
+16968773,Sucre
+16968780,Suratá
+16968820,Tona
+16968855,Valle De San José
+16968861,Vélez
+16968867,Vetas
+16968872,Villanueva
+16968895,Zapatoca
+16970,Sucre
+16970001,Sincelejo
+16970110,Buenavista
+16970124,Caimito
+16970204,Colosó
+16970215,Corozal
+16970221,Covenas
+16970230,Chalán
+16970235,Galeras
+16970265,Guaranda
+16970400,La Unión
+16970418,Los Palmitos
+16970429,Majagual
+16970473,Morroa
+16970508,Ovejas
+16970523,Palmito
+16970670,Sampués
+16970678,San Benito Abad
+16970702,San Juan De Betulia
+16970708,San Marcos
+16970713,San Onofre
+16970717,San Pedro
+16970742,San Luis De Sincé
+16970771,Sucre
+16970820,Santiago De Tolú
+16970823,Tolú Viejo
+16973,Tolima
+16973001,Ibagué
+16973024,Alpujarra
+16973026,Alvarado
+16973030,Ambalema
+16973043,Anzoátegui
+16973055,Armero
+16973067,Ataco
+16973124,Cajamarca
+16973148,Carmen De Apicalá
+16973152,Casabianca
+16973168,Chaparral
+16973200,Coello
+16973217,Coyaima
+16973226,Cunday
+16973236,Dolores
+16973268,Espinal
+16973270,Falan
+16973275,Flandes
+16973283,Fresno
+16973319,Guamo
+16973347,Herveo
+16973349,Honda
+16973352,Icononzo
+16973408,Lérida
+16973411,Líbano
+16973443,San Sebastián De Mariquita
+16973449,Melgar
+16973461,Murillo
+16973483,Natagaima
+16973504,Ortega
+16973520,Palocabildo
+16973547,Piedras
+16973555,Planadas
+16973563,Prado
+16973585,Purificación
+16973616,Rioblanco
+16973622,Roncesvalles
+16973624,Rovira
+16973671,Saldaña
+16973675,San Antonio
+16973678,San Luis
+16973686,Santa Isabel
+16973770,Suárez
+16973854,Valle De San Juan
+16973861,Venadillo
+16973870,Villahermosa
+16973873,Villarrica
+16976,Valle del Cauca
+16976001,Cali
+16976020,Alcalá
+16976036,Andalucía
+16976041,Ansermanuevo
+16976054,Argelia
+16976100,Bolívar
+16976109,Buenaventura
+16976111,Guadalajara De Buga
+16976113,Bugalagrande
+16976122,Caicedonia
+16976126,Calima
+16976130,Candelaria
+16976147,Cartago
+16976233,Dagua
+16976243,El Águila
+16976246,El Cairo
+16976248,El Cerrito
+16976250,El Dovio
+16976275,Florida
+16976306,Ginebra
+16976318,Guacarí
+16976364,Jamundí
+16976377,La Cumbre
+16976400,La Unión
+16976403,La Victoria
+16976497,Obando
+16976520,Palmira
+16976563,Pradera
+16976606,Restrepo
+16976616,Riofrío
+16976622,Roldanillo
+16976670,San Pedro
+16976736,Sevilla
+16976823,Toro
+16976828,Trujillo
+16976834,Tuluá
+16976845,Ulloa
+16976863,Versalles
+16976869,Vijes
+16976890,Yotoco
+16976892,Yumbo
+16976895,Zarzal
+16981,Arauca
+16981001,Arauca
+16981065,Arauquita
+16981220,Cravo Norte
+16981300,Fortul
+16981591,Puerto Rondón
+16981736,Saravena
+16981794,Tame
+16985,Casanare
+16985001,Yopal
+16985010,Aguazul
+16985015,Chámeza
+16985125,Hato Corozal
+16985136,La Salina
+16985139,Maní
+16985162,Monterrey
+16985225,Nunchía
+16985230,Orocué
+16985250,Paz De Ariporo
+16985263,Pore
+16985279,Recetor
+16985300,Sabanalarga
+16985315,Sácama
+16985325,San Luis De Palenque
+16985400,Támara
+16985410,Tauramena
+16985430,Trinidad
+16985440,Villanueva
+16986,Putumayo
+16986001,Mocoa
+16986219,Colón
+16986320,Orito
+16986568,Puerto Asís
+16986569,Puerto Caicedo
+16986571,Puerto Guzmán
+16986573,Puerto Leguízamo
+16986749,Sibundoy
+16986755,San Francisco
+16986757,SAN MIGUEL
+16986760,Santiago
+16986865,Valle Del Guamuez
+16986885,Villagarzón
+16988,San Andrés y Providencia
+16988001,San Andrés
+16988564,Providencia
+16991,Amazonas
+16991001,Leticia
+16991263,El Encanto
+16991405,La Chorrera
+16991407,La Pedrera
+16991460,Mirití - Paraná
+16991540,Puerto Nariño
+16991669,Puerto Santander
+16991798,Tarapacá
+16994,Guainía
+16994001,Inírida
+16994343,Barrancominas
+16995,Guaviare
+16995001,San José Del Guaviare
+16995015,Calamar
+16995025,El Retorno
+16995200,Miraflores
+16995220,MORICHAL
+16997,Vaupés
+16997001,Mitú
+16997161,Carurú
+16997511,Pacoa
+16997889,Yavaraté
+16999,Vichada
+16999001,Puerto Carreño
+16999524,La Primavera
+16999572,SANTA RITA
+16999760,SAN JOSE DE OCUNE
+16999765,SANTA ROSALIA
+16999773,CUMARIBO

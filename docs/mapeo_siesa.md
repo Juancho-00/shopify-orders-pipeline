@@ -21,34 +21,45 @@ una sola dirección completa; no se mezclan campos de varias.
 | `segundo_nombre` | Nombre (segundo) | `billing_address.first_name` | Resto de palabras (`"Juan Pablo"` → `Pablo`) |
 | `primer_apellido` | Apellido uno | `billing_address.last_name` | Primer apellido; respeta partículas (`"De la Torre"`) |
 | `segundo_apellido` | Apellido dos | `billing_address.last_name` | Resto (`"Lozano Gutierrez"` → `Gutierrez`) |
-| `tipo_documento` | Documento (CC o NIT) | `billing_address.company` | Ver *Reglas de documento* |
+| `tipo_documento` | Documento (CC o NIT) | `billing_address.company` | Código Siesa: `C` = cédula, `N` = NIT (R-10). Ver *Reglas de documento* |
 | `numero_documento` | Número de documento | `billing_address.company` → respaldo `shipping_address.company` | Solo dígitos (quita puntos, espacios y prefijos) |
 | `digito_verificacion` | — | Calculado | Solo NIT: el escrito por el cliente o calculado con el algoritmo de la DIAN |
-| `direccion` | Dirección | `address1` + `address2` | Unidos con espacio |
-| `ciudad` | — | `city` | Texto (Siesa puede requerir código DANE: pendiente) |
+| `direccion` | Dirección | `address1` | |
+| `direccion_complemento` | — | `address2` | Apto, torre, referencias (campo aparte en la plantilla de Siesa) |
+| `ciudad` | — | `city` | Texto, como lo escribió el cliente |
 | `departamento` | — | `province` | Texto |
+| `codigo_ciudad_siesa` | Ciudad | `city` + `province_code` | `169` + DANE (`16905001` = Medellín), con `catalogos/ciudades_siesa.csv` (R-11). Si no se encuentra: alerta `CIUDAD_SIN_CODIGO` |
 | `codigo_postal` | Código postal | `zip` | |
 | `pais` | — | `country_code` | `CO` |
 | `telefono` | Teléfono | `billing.phone` → `shipping.phone` → `order.phone` → `customer.phone` | 10 dígitos, sin `+57` |
 | `email` | Email | `order.email` → `contact_email` → `customer.email` | |
 | `fecha_compra` | Fecha de compra | `processed_at` | Hora Colombia, `AAAA-MM-DD HH:MM:SS` |
 
-### Reglas de documento (campo `company`)
+### Reglas de documento (campo `company`) — R-06
+
+Si el cliente escribe el tipo (`CC`, `NIT`, `CE`...) o el guion del DV, se respeta. Si solo
+escribe el número, el tipo se deduce por el formato:
+
+| Número | Resultado |
+|---|---|
+| 9 dígitos que empiezan por `800`, `900` o `901` | NIT, DV calculado (≈95 % de los NIT) |
+| 9 dígitos que empiezan por otro 8 o 9 | NIT, DV calculado, alerta `NIT_POR_VERIFICAR` |
+| 7 u 8 dígitos | CC (cédulas antiguas) |
+| 10 dígitos | CC (cédulas nuevas, p. ej. `1152469156`) |
+| 10 dígitos = NIT con prefijo `800`/`900`/`901` + DV válido pegado | NIT (`9001234567` → `900123456`, DV `7`) |
+| Cualquier otro largo o prefijo | Sin tipo, alerta `TIPO_DOCUMENTO_NO_IDENTIFICADO` |
 
 | Lo que escribe el cliente | Resultado |
 |---|---|
-| `1152469156`, `1.152.469.156` | CC `1152469156` |
+| `1.152.469.156` | CC `1152469156` |
 | `CC 43123456`, `C.C. 43.123.456` | CC `43123456` |
 | `900123456-7`, `NIT 900.123.456` | NIT `900123456`, DV escrito o calculado |
-| 9 dígitos que empiezan por 8 o 9 | NIT (rango de empresas de la DIAN), DV calculado, alerta `NIT_POR_VERIFICAR` |
-| `CE 123456` | CE (cédula de extranjería) |
+| `CE 123456` | CE, alerta `TIPO_DOCUMENTO_SIN_CODIGO_SIESA` (código Siesa pendiente) |
 | Vacío | Alerta `SIN_DOCUMENTO` |
 | Menos de 5 o más de 11 dígitos | Alerta `DOCUMENTO_INVALIDO` |
 | DV escrito distinto al calculado | Alerta `DV_NIT_INVALIDO` |
 
-⚠️ **Pendiente de definir.** El tipo de documento se **deduce** porque Shopify solo captura
-el número. La regla anterior es provisional; está aislada en `parse_documento`
-(`transform/normalize.py`) para cambiarla en un solo lugar cuando se defina.
+La regla está aislada en `parse_documento` / `tipo_por_formato` (`transform/normalize.py`).
 
 ## Datos del pedido
 
@@ -66,27 +77,32 @@ el número. La regla anterior es provisional; está aislada en `parse_documento`
 | Columna | Requerimiento | Producto | Envío |
 |---|---|---|---|
 | `tipo_linea` | — | `PRODUCTO` | `ENVIO` |
-| `referencia` | Referencia o código del producto | `line_items[].sku` | Código configurable (default `ENVIO`) |
+| `referencia` | Referencia o código del producto | `line_items[].sku` | `SERV01` (R-08; configurable con `SIESA_CODIGO_ENVIO`) |
 | `descripcion` | — | `line_items[].name` | `shipping_lines[].title` |
-| `bodega` / `id_bodega_shopify` | Bodega de salida | `fulfillment_orders[].assigned_location` (llamada extra por pedido) | Vacío |
+| `bodega` / `id_bodega_shopify` | Bodega de salida | `fulfillment_orders[].assigned_location` (llamada extra por pedido) | La del primer producto |
+| `bodega_siesa` | Bodega Siesa | `bodega` traducida con `catalogos/bodegas_siesa.csv` (R-09). Sin equivalencia: alerta `BODEGA_SIN_EQUIVALENCIA` | La del primer producto |
 | `cantidad` | Cantidad ordenada | `current_quantity` (o `quantity`) | `1` |
-| `precio_unitario` | Precio unitario | `line_items[].price` | `shipping_lines[].discounted_price` |
-| `descuento_linea` | — | Suma de `discount_allocations`; con reembolso parcial, prorrateada: `descuento × current_quantity / quantity` | `0` |
-| `valor_total_linea` | — | `precio × cantidad − descuento` | Igual al precio |
-| `tasa_iva` | — | Suma de `tax_lines[].rate` | Ídem |
+| `precio_unitario` | Precio unitario del ítem | `line_items[].price` | `shipping_lines[].price` |
+| `descuento_linea` | — | Suma de `discount_allocations`; con reembolso parcial, prorrateada: `descuento × current_quantity / quantity` (informativo) | `price − discounted_price` |
+| `precio_neto` | **Precio que se sube a Siesa** | `(precio_unitario × cantidad − descuento) / cantidad` (R-13) | `discounted_price` |
+| `valor_total_linea` | — | `precio_neto × cantidad` | Igual a `precio_neto` |
+
+Todos los valores de dinero van en **pesos enteros**, redondeados al peso más cercano (R-23).
+| `tasa_iva` | — | Suma de `tax_lines[].rate` | `tax_lines`; si viene vacío, `0.19` (R-07) |
 | `precio_incluye_iva` | — | `taxes_included` | Ídem |
 
 **Regla del envío:** se agrega la línea solo si el valor cobrado (`discounted_price`) es mayor a
 cero y la línea no fue eliminada (`is_removed`). Un envío gratis por descuento no genera línea.
 
-**Precios con IVA incluido (definido 2026-10-14):** el precio del producto y el del envío
-se envían tal como los cobra Shopify, con IVA incluido; no requieren transformación.
-Ejemplo #1006: producto $89.999 (base $75.629,41 + IVA $14.369,59).
+**Precios con IVA incluido (R-07):** el precio del producto y el del envío se envían tal
+como los cobra Shopify, con IVA incluido. Ejemplo #1006: producto $89.999 (base $75.629,41 +
+IVA $14.369,59). En Siesa el envío (`SERV01`) lleva IVA; como el valor web ya lo incluye, no
+se transforma. Shopify no desglosa ese IVA (`tax_lines` vacío), por eso el reporte pone `0.19`.
 
-⚠️ En el #1006, Shopify **no calculó IVA sobre el envío**: `shipping_lines[].tax_lines` viene
-vacío, `tasa_iva` sale en 0 y el IVA total del pedido ($14.369,59) corresponde solo al
-producto. Si el envío debe llevar IVA, hay que revisar en Shopify la opción de cobrar
-impuestos sobre las tarifas de envío. Si no, Siesa calculará un IVA distinto al de Shopify.
+**Sin descuentos ni decimales (R-13, R-23):** Siesa no recibe descuentos, así que se sube
+`precio_neto`: lo que pagó el cliente por unidad, redondeado a pesos. El total del
+pedido se valida contra Shopify con una tolerancia de **$50** (R-24) para absorber ese
+redondeo; una diferencia mayor genera `TOTAL_NO_CUADRA`.
 
 ## Exclusiones
 
@@ -129,12 +145,16 @@ una fila por evento. El log no incluye datos personales del cliente.
 | `SIN_DOCUMENTO` | Pedido | El cliente no registró cédula/NIT en `company` |
 | `DOCUMENTO_INVALIDO` | Pedido | El documento no tiene entre 5 y 11 dígitos |
 | `DV_NIT_INVALIDO` | Pedido | El dígito de verificación escrito no coincide con el calculado |
-| `NIT_POR_VERIFICAR` | Pedido | Clasificado como NIT solo por formato (regla provisional) |
+| `NIT_POR_VERIFICAR` | Pedido | 9 dígitos que empiezan por 8 o 9, pero no por 800/900/901 |
+| `TIPO_DOCUMENTO_NO_IDENTIFICADO` | Pedido | El número no tiene formato de CC ni de NIT (R-06) |
+| `TIPO_DOCUMENTO_SIN_CODIGO_SIESA` | Pedido | CE o pasaporte: Siesa aún no tiene código definido |
+| `CIUDAD_SIN_CODIGO` | Pedido | La ciudad no se encontró en la tabla de Siesa; el detalle muestra ciudad / departamento |
 | `SIN_NOMBRE` / `SIN_APELLIDO` / `SIN_DIRECCION` / `SIN_TELEFONO` / `SIN_EMAIL` | Pedido | Dato del cliente faltante |
-| `TOTAL_NO_CUADRA` | Pedido | La suma de las líneas no coincide con el total de Shopify |
+| `TOTAL_NO_CUADRA` | Pedido | La suma de las líneas difiere más de $50 del total de Shopify |
 | `PEDIDO_CANCELADO` | Pedido | Solo con `--incluir-cancelados` |
 | `SIN_SKU` | Línea | Producto sin referencia: no se puede crear en Siesa |
 | `SIN_BODEGA` | Línea | Shopify no tiene la línea asignada a ninguna bodega |
+| `BODEGA_SIN_EQUIVALENCIA` | Línea | La bodega de Shopify no está en `catalogos/bodegas_siesa.csv` |
 | `BODEGA_NO_CONSULTADA` | Línea | Se ejecutó con `--sin-bodega` o falta el permiso para consultar bodegas |
 | `PAGO_NO_CONFIRMADO` / `CANCELADO` / `PRUEBA` | Exclusión | Ver *Exclusiones* |
 | `YA_REPORTADO` | Exclusión | El pedido ya salió en el reporte de otra corrida (ventanas solapadas); no se repite |
@@ -145,21 +165,17 @@ una fila por evento. El log no incluye datos personales del cliente.
 Además, cada ejecución queda en la bitácora `data/logs/shopify_pipeline_AAAAMMDD.log`
 (inicio, ventana consultada, conteos, resumen de alertas y errores).
 
-## Decisiones tomadas (2026-10-14)
+## Decisiones tomadas
 
-- [x] Precios con IVA incluido, sin transformación adicional.
-- [x] Solo pedidos con pago confirmado pasan a Siesa.
-- [x] Pedidos cancelados y de prueba excluidos.
-- [x] Alertas en un log aparte, fuera del reporte.
+- [x] Precios con IVA incluido, sin transformación adicional (2026-10-14).
+- [x] Solo pedidos con pago confirmado pasan a Siesa (2026-10-14).
+- [x] Pedidos cancelados y de prueba excluidos (2026-10-14).
+- [x] Alertas en un log aparte, fuera del reporte (2026-10-14).
+- [x] Reglas R-06 a R-13 (2026-10-19): tipo de documento por formato, envío `SERV01` con
+  IVA, bodegas y ciudades con código Siesa, `C`/`N`, referencia = número sin `#`, precio
+  neto sin descuento. Detalle en [reglas_negocio.md](reglas_negocio.md).
 
 ## Pendiente de definir
 
-- [ ] **Cómo identificar un NIT.** Regla provisional: prefijo `NIT`, guion con DV, o 9 dígitos
-  que inician en 8 o 9 (este último caso queda como `NIT_POR_VERIFICAR`). Lo ideal es que
-  Shopify capture el tipo de documento en un campo propio.
-- [ ] Si el envío debe llevar IVA (hoy Shopify no lo calcula; ver arriba).
-- [ ] Código Siesa de cada bodega de Shopify (tabla de equivalencias por `id_bodega_shopify`).
-- [ ] Código del ítem de envío en Siesa (`SIESA_CODIGO_ENVIO`).
-- [ ] Códigos de tipo de documento en Siesa (CC, NIT, CE).
-- [ ] Si la ciudad debe ir como código DANE.
-- [ ] Si `documento_referencia` va como `1006` o con prefijo (p. ej. `SHOP-1006`).
+- [ ] Código Siesa de cédula de extranjería y pasaporte (pregunta P-5 de
+  [plantillas_siesa.md](plantillas_siesa.md)).

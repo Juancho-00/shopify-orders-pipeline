@@ -159,3 +159,72 @@ Registro breve de decisiones de diseño y su motivo.
   sale de la ventana y `--strict` fallaba (código 3) sin que se hubiera perdido nada; en
   modo incremental eso además impedía avanzar el watermark. La ventana es fija, así que un
   pedido solo puede salir de ella, nunca entrar; ese pedido entra en la corrida siguiente.
+
+## 019 · Ejecución diaria con el Programador de tareas de Windows (2026-10-19)
+
+- **Decisión:** la tarea programada corre `scripts/ejecutar_pipeline.ps1`, que ejecuta
+  `extract --incremental --strict`; se registra con `scripts/registrar_tarea.ps1`. Un único
+  reintento a los 10 minutos, solo ante código 1. Historial en `data/logs/ejecuciones.csv`.
+- **Motivo:** el modo incremental (decisión 011) ya cubre corridas fallidas o atrasadas; el
+  reintento cubre caídas breves sin esperar al día siguiente.
+- **Consecuencia:** como `data/` vive en Google Drive, la tarea corre con el usuario que tiene
+  Drive iniciado y solo con su sesión abierta; el script espera hasta 15 minutos a que G:
+  esté disponible. Un solo equipo debe tener la tarea registrada.
+- **Pendiente:** equipo, usuario, hora y responsable de la revisión diaria.
+
+## 020 · Catálogos de bodegas y ciudades de Siesa en el paquete (2026-10-19)
+
+- **Decisión:** las tablas de equivalencia viajan con el código en
+  `src/shopify_pipeline/catalogos/` (`bodegas_siesa.csv`, `ciudades_siesa.csv`) y se leen con
+  `transform/catalogos.py`. La comparación ignora tildes, mayúsculas y apóstrofos (`D’Luchi` =
+  `D'Luchi`). `SIESA_CATALOGOS_DIR` permite usar otra carpeta.
+- **Motivo:** R-09 y R-11. Son datos de configuración, no de clientes. Así quedan versionados
+  y probados, y un cambio de bodega se revisa como cualquier otro cambio.
+- **Consecuencia:** el reporte trae `bodega_siesa` y `codigo_ciudad_siesa`. Lo que no
+  tiene equivalencia genera `BODEGA_SIN_EQUIVALENCIA` o `CIUDAD_SIN_CODIGO`. Una ciudad con
+  nombre repetido se busca dentro del departamento del pedido; si sigue siendo ambigua, no se
+  adivina.
+
+## 021 · Tipo de documento por formato del número (2026-10-19)
+
+- **Decisión:** se aplica R-06 (NIT = 9 dígitos con prefijo 800/900/901; CC = 7–8 dígitos o
+  10 dígitos). El reporte usa los códigos de Siesa `C` y `N` (R-10). *Ajustada por la 024.*
+- **Consecuencia:** un número que no encaja ya no se asume como CC: queda sin tipo y con
+  `TIPO_DOCUMENTO_NO_IDENTIFICADO`. CE y pasaporte quedan con `TIPO_DOCUMENTO_SIN_CODIGO_SIESA`
+  hasta que Siesa defina su código.
+
+## 022 · Precio neto en pesos enteros y tolerancia de $50 (2026-10-19)
+
+- **Decisión** (*ajustada por la 024*): el precio que va a Siesa es el neto por unidad (sin descuento aparte, R-13),
+  redondeado a pesos (R-23). El envío usa `SERV01` (R-08), IVA 19 % incluido (R-07) y la bodega
+  de los productos. El total se valida con tolerancia de $50 (R-24).
+- **Motivo:** Siesa no recibe descuentos ni decimales, y la plantilla usa `ind_precio = 2`
+  (liquida con el precio enviado).
+- **Consecuencia:** cambian las columnas del reporte: se agregan `precio_neto`,
+  `bodega_siesa`, `codigo_ciudad_siesa` y `direccion_complemento` (la dirección ya no se une
+  con el complemento, porque la plantilla los separa).
+
+## 023 · Conciliación con el exporte de Siesa (2026-10-19)
+
+- **Decisión:** fase 2 = comando `conciliar`. Lee el exporte más reciente de
+  `data/siesa/exportes/` (xlsx/csv) y verifica que cada pedido de los reportes oficiales
+  (no los `_revision`) de los últimos 30 días tenga su número en `_num_docto_referencia`
+  (R-20 a R-22). Resultado en `data/reconciliation/`.
+- **Motivo:** R-20 opción C, sin permisos técnicos sobre Siesa. El lector busca la fila de
+  encabezados y normaliza `#1006` / `1006.0` para que el cruce no falle por formato.
+- **Consecuencia:** `--strict` devuelve código 3 si falta algún pedido. Falta probarlo con un
+  exporte real.
+
+## 024 · Aclaraciones del 2026-10-19: Client Credentials, dos precios, CC de 10 dígitos
+
+- **Autenticación:** la conexión con Shopify se hace con **Client Credentials** (app del Dev
+  Dashboard). `SHOPIFY_ACCESS_TOKEN` queda solo como respaldo en el código y comentado en
+  `.env.example`.
+- **Precios:** el reporte trae `precio_unitario` (precio del ítem) y `precio_neto` (con el
+  descuento aplicado). A Siesa se sube `precio_neto`. Todo en pesos enteros, redondeados al
+  peso más cercano.
+- **Cédulas:** cualquier número de 10 dígitos es CC, no solo los que empiezan por 10/11. Se
+  exceptúa un NIT de 800/900/901 con su DV pegado (`9001234567`), que se detecta porque el
+  último dígito coincide con el DV calculado.
+- **Exporte de Siesa:** confirmado con el exporte real: `Nro documento` (`CPM-00003210`) y
+  `_num_docto_referencia`. La conciliación muestra el `Nro documento` como `documento_siesa`.

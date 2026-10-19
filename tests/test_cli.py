@@ -141,9 +141,9 @@ def test_extract_end_to_end_pedido_1006(monkeypatch, tmp_path):
     (csv_file,) = (tmp_path / "siesa").glob("*.csv")
     with csv_file.open(encoding="utf-8-sig", newline="") as fh:
         rows = list(csv.DictReader(fh))
-    assert [(r["referencia"], r["bodega"]) for r in rows] == [
-        ("KITK0108", "Bodega Principal Medellín"),
-        ("FLETE", ""),
+    assert [(r["referencia"], r["bodega_siesa"]) for r in rows] == [
+        ("KITK0108", "LCD01"),
+        ("FLETE", "LCD01"),  # el envío sale de la misma bodega que los productos
     ]
     assert rows[0]["numero_documento"] == "1017000001"
 

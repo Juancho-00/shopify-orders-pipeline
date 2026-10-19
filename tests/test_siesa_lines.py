@@ -59,15 +59,23 @@ def test_datos_cliente(order):
     assert row["segundo_nombre"] == "Sofía"
     assert row["primer_apellido"] == "Restrepo"
     assert row["segundo_apellido"] == "de la Torre"
-    # Cédula desde billing_address.company, sin puntos
-    assert row["tipo_documento"] == "CC"
+    # Cédula desde billing_address.company, sin puntos; Siesa la identifica con "C" (R-10)
+    assert row["tipo_documento"] == "C"
     assert row["numero_documento"] == "1017000001"
     assert row["telefono"] == "3001112233"
     assert row["email"] == "cliente.prueba@example.com"
     assert row["direccion"] == "Calle 10 # 20-30"
+    assert row["direccion_complemento"] == ""
+
+
+def test_direccion_y_complemento_separados(order):
+    order["billing_address"]["address2"] = "Apto 301"
+    row = rows(order)[0]
+    assert (row["direccion"], row["direccion_complemento"]) == ("Calle 10 # 20-30", "Apto 301")
     assert row["codigo_postal"] == "050021"
     assert row["ciudad"] == "Medellin"
     assert row["departamento"] == "Antioquia"
+    assert row["codigo_ciudad_siesa"] == "16905001"  # 169 + DANE de Medellín (R-11)
 
 
 def test_cedula_desde_shipping_si_falta_en_billing(order):
@@ -92,7 +100,7 @@ def test_nit_con_dv(order):
     order["billing_address"]["company"] = "800.197.268-4"
     row = rows(order)[0]
     assert (row["tipo_documento"], row["numero_documento"], row["digito_verificacion"]) == (
-        "NIT",
+        "N",
         "800197268",
         "4",
     )
@@ -100,9 +108,29 @@ def test_nit_con_dv(order):
 
 
 def test_nit_inferido_queda_por_verificar(order):
-    order["billing_address"]["company"] = "800197268"
-    assert rows(order)[0]["tipo_documento"] == "NIT"
+    order["billing_address"]["company"] = "850197268"  # 9 dígitos, pero no inicia en 800/900/901
+    assert rows(order)[0]["tipo_documento"] == "N"
     assert codigos(order) == ["NIT_POR_VERIFICAR"]
+
+
+def test_nit_por_prefijo_sin_alerta(order):
+    order["billing_address"]["company"] = "900197268"  # R-06: 9 dígitos con prefijo 900
+    assert rows(order)[0]["tipo_documento"] == "N"
+    assert codigos(order) == []
+
+
+def test_cedula_extranjeria_sin_codigo_siesa(order):
+    order["billing_address"]["company"] = "CE 123456"
+    assert rows(order)[0]["tipo_documento"] == ""
+    assert codigos(order) == ["TIPO_DOCUMENTO_SIN_CODIGO_SIESA"]
+
+
+def test_ciudad_desconocida_genera_alerta(order):
+    for clave in ("billing_address", "shipping_address"):
+        order[clave]["city"] = "Ciudad Inventada"
+    (evento,) = order_to_lines(order).eventos
+    assert evento.codigo == "CIUDAD_SIN_CODIGO"
+    assert evento.detalle == "Ciudad Inventada / Antioquia"
 
 
 # --------------------------------------------------------------------- pedido
@@ -126,21 +154,47 @@ def test_notas_y_atributos(order):
 def test_linea_producto(order):
     row = rows(order)[0]
     assert row["referencia"] == "KITK0108"
-    assert row["bodega"] == "Bodega Principal Medellín"
+    assert row["bodega"] == "D'Luchi PT Guarne"
+    assert row["bodega_siesa"] == "LCD01"  # R-09
     assert row["id_bodega_shopify"] == "80001"
     assert row["cantidad"] == 1
-    assert row["precio_unitario"] == Decimal("89999.00")
+    assert row["precio_unitario"] == Decimal("89999")
+    assert row["precio_neto"] == Decimal("89999")  # sin descuento: igual al precio del ítem
     assert row["tasa_iva"] == Decimal("0.1900")
     assert row["precio_incluye_iva"] == "SI"
 
 
 def test_linea_envio(order):
     row = rows(order)[1]
-    assert row["referencia"] == "ENVIO"
+    assert row["referencia"] == "SERV01"  # R-08
     assert row["cantidad"] == 1
-    assert row["precio_unitario"] == Decimal("12294.34")
-    assert row["bodega"] == ""
+    assert row["precio_unitario"] == row["precio_neto"] == Decimal("12294")  # pesos enteros (R-23)
+    assert row["tasa_iva"] == Decimal("0.1900")  # el envío lleva IVA incluido (R-07)
+    assert (row["bodega"], row["bodega_siesa"]) == ("D'Luchi PT Guarne", "LCD01")  # misma de los productos
     assert row["numero_linea"] == 2
+
+
+def test_envio_con_descuento(order):
+    order["shipping_lines"][0].update({"price": "15000.00", "discounted_price": "7500.40"})
+    row = rows(order)[1]
+    assert (row["precio_unitario"], row["descuento_linea"], row["precio_neto"]) == (
+        Decimal("15000"),
+        Decimal("7500"),
+        Decimal("7500"),
+    )
+
+
+def test_precios_con_decimales_se_redondean(order):
+    order["line_items"][0]["price"] = "89999.50"
+    row = rows(order)[0]
+    assert row["precio_unitario"] == row["precio_neto"] == Decimal("90000")
+
+
+def test_bodega_sin_equivalencia(order):
+    order[FULFILLMENT_KEY][0]["assigned_location"]["name"] = "Bodega Nueva"
+    (evento,) = order_to_lines(order).eventos
+    assert (evento.codigo, evento.detalle) == ("BODEGA_SIN_EQUIVALENCIA", "Bodega Nueva")
+    assert rows(order)[0]["bodega_siesa"] == ""
 
 
 def test_codigo_envio_configurable(order):
@@ -166,8 +220,11 @@ def test_descuentos_y_multiples_unidades(order):
     item["discount_allocations"] = [{"amount": "10000.00"}]
     row = rows(order)[0]
     assert row["cantidad"] == 2
-    assert row["descuento_linea"] == Decimal("10000.00")
-    assert row["valor_total_linea"] == Decimal("169998.00")
+    assert row["descuento_linea"] == Decimal("10000")
+    # Siesa no recibe descuentos (R-13): precio neto por unidad = (2*89999 - 10000) / 2
+    assert row["precio_unitario"] == Decimal("89999")
+    assert row["precio_neto"] == Decimal("84999")
+    assert row["valor_total_linea"] == Decimal("169998")
 
 
 def test_reembolso_parcial_prorratea_el_descuento(order):
@@ -177,8 +234,8 @@ def test_reembolso_parcial_prorratea_el_descuento(order):
     item["discount_allocations"] = [{"amount": "10000.00"}]
     row = rows(order)[0]
     assert row["cantidad"] == 1
-    assert row["descuento_linea"] == Decimal("5000.00")
-    assert row["valor_total_linea"] == Decimal("84999.00")
+    assert row["descuento_linea"] == Decimal("5000")
+    assert row["valor_total_linea"] == Decimal("84999")
 
 
 def test_linea_eliminada_se_omite(order):
@@ -202,7 +259,13 @@ def test_sin_bodega_asignada(order):
 
 
 def test_total_de_lineas_cuadra_con_shopify(order):
-    assert sum(r["valor_total_linea"] for r in rows(order)) == Decimal("102293.34")  # total del #1006
+    # Total del #1006 = 102293.34; las líneas van en pesos enteros y cuadran dentro de $50 (R-24)
+    assert sum(r["valor_total_linea"] for r in rows(order)) == Decimal("102293")
+    assert "TOTAL_NO_CUADRA" not in codigos(order)
+
+
+def test_diferencia_menor_a_50_pesos_se_acepta(order):
+    order["current_total_price"] = "102340.00"
     assert "TOTAL_NO_CUADRA" not in codigos(order)
 
 
@@ -210,7 +273,7 @@ def test_total_no_cuadra_genera_alerta(order):
     order["current_total_price"] = "150000.00"  # p. ej. una propina o cargo no modelado
     (evento,) = order_to_lines(order).eventos
     assert evento.codigo == "TOTAL_NO_CUADRA"
-    assert evento.detalle == "Shopify 150000.00 vs líneas 102293.34"
+    assert evento.detalle == "Shopify 150000.00 vs líneas 102293.00"
 
 
 def test_eventos_no_contienen_datos_personales(order):

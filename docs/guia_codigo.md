@@ -58,7 +58,7 @@ el límite de llamadas. Los pasos 13 a 15 no llaman a Shopify.
 src/shopify_pipeline/
 ├── __init__.py          Marca la carpeta como paquete y define la versión
 ├── __main__.py          Permite ejecutar "python -m shopify_pipeline"
-├── cli.py               Comandos de terminal (extract, transform) → códigos de salida
+├── cli.py               Comandos de terminal (extract, transform, conciliar) → códigos de salida
 ├── logs.py              Bitácora: consola + archivo diario
 ├── config.py            Lee el .env y valida dominio y credenciales
 ├── exceptions.py        Los tipos de error con nombre propio
@@ -69,8 +69,10 @@ src/shopify_pipeline/
 │   ├── client.py        Peticiones HTTP: errores, reintentos, límite, páginas
 │   ├── orders.py        Filtros de pedidos y descarga
 │   └── fulfillment.py   Bodega de salida de cada producto
+├── catalogos/           Tablas de Siesa en CSV: bodegas y ciudades (datos, no código)
 ├── transform/           De pedido crudo a reporte Siesa (no llama a Shopify)
 │   ├── normalize.py     Funciones de limpieza (nombres, cédula/NIT, teléfono...)
+│   ├── catalogos.py     Traduce bodega y ciudad a los códigos de Siesa
 │   ├── siesa_lines.py   Pedido → filas; decide qué pedidos se excluyen
 │   ├── alertas.py       Catálogo de alertas y exclusiones del log
 │   └── run.py           Orquesta la transformación: leer JSONL → escribir reporte
@@ -78,8 +80,10 @@ src/shopify_pipeline/
 │   ├── atomic.py        Escritura atómica compartida (temporal + renombrar)
 │   ├── jsonl.py         JSON Lines (zona cruda)
 │   └── tabular.py       CSV y Excel
-├── reconciliation/      Fase 2 (vacía por ahora)
-└── erp/                 Fase 3 (vacía por ahora)
+├── reconciliation/      Fase 2: ¿los pedidos reportados están en Siesa?
+│   ├── siesa_export.py  Lee el exporte de Siesa y saca los números de pedido
+│   └── run.py           Cruza y escribe el reporte de conciliación
+└── erp/                 Fase 3 (vacía por ahora; ver docs/plantillas_siesa.md)
 ```
 
 **Regla para orientarse:** los archivos de `shopify/` saben de Shopify pero no de Siesa. Los
@@ -254,13 +258,30 @@ saben nada de Shopify ni de Siesa, por eso son fáciles de probar y de reutiliza
 | `split_nombres`   | `"Juan Pablo"` → `("Juan", "Pablo")`                               |
 | `split_apellidos` | `"De la Torre Gómez"` → `("De la Torre", "Gómez")`               |
 | `parse_documento` | `"1.152.469.156"` → CC `1152469156`; `"900123456-7"` → NIT + DV |
+| `tipo_por_formato` | `"900123456"` → NIT; `"70123456"` → CC; `"123456"` → sin tipo (R-06) |
 | `calcular_dv_nit` | `"800197268"` → `"4"` (algoritmo de la DIAN)                       |
 | `normalize_phone` | `"+57 323 501 6059"` → `"3235016059"`                              |
 | `to_decimal`      | `"12294.34"` → `Decimal("12294.34")` (sin errores de redondeo)     |
 | `to_bogota`       | `"2026-10-08T22:59:15Z"` → `"2026-10-08 17:59:15"` (hora Colombia) |
 
-`parse_documento` contiene la **regla provisional** para identificar un NIT. Cuando se
-defina la regla definitiva, se cambia solo esa función.
+`tipo_por_formato` contiene la regla R-06 para saber si un número sin prefijo es CC o NIT.
+Si la regla cambia, se cambia solo esa función.
+
+### `transform/catalogos.py` — bodegas y ciudades de Siesa
+
+**Para qué:** traducir lo que dice Shopify a los códigos que entiende Siesa, usando las
+tablas de `catalogos/` (R-09, R-11).
+
+| Función | Entrada → salida |
+|---|---|
+| `codigo_bodega` | `"D’Luchi PT Guarne"` → `"LCD01"`; bodega desconocida → `""` |
+| `codigo_ciudad` | `("Medellin", "Antioquia", "ANT")` → `"16905001"`; ambigua o desconocida → `""` |
+| `partes_ciudad` | `"16905001"` → `("169", "05", "001")` (país, depto, ciudad para la plantilla) |
+| `normalizar` | Quita tildes, mayúsculas, apóstrofos y signos para comparar textos |
+
+Una ciudad con nombre repetido (hay 63, como "La Unión") se busca **dentro del departamento**
+del pedido. Si aun así no se puede decidir, devuelve vacío y el pedido sale con alerta: es
+mejor revisar a mano que mandar a Siesa la ciudad equivocada.
 
 ### `transform/siesa_lines.py` — el corazón del reporte
 
@@ -279,7 +300,8 @@ producto, más una de envío) y decidir qué pedidos no pasan.
 | `_motivo_ledger`                                | ¿Ya salió en el reporte de otra corrida? (`YA_REPORTADO` o, si su total cambió, `CAMBIO_POST_REPORTE`) |
 | `order_to_lines`                                | Convierte un pedido: datos del cliente + una fila por producto + fila de envío si cuesta más de 0 |
 | `_cliente`                                      | Arma los datos del cliente (nombre, cédula, dirección, teléfono, email) y sus alertas            |
-| `_diferencia_total`                             | Control: ¿la suma de las filas = total del pedido en Shopify?                                      |
+| `_diferencia_total`                             | Control: ¿la suma de las filas = total del pedido en Shopify? (tolerancia $50, R-24)               |
+| `TIPO_DOC_SIESA` / `IVA_ENVIO`                  | `CC` → `C`, `NIT` → `N` (R-10) / IVA del envío cuando Shopify no lo desglosa (R-07)                 |
 | `_descuento`, `_tasa`, `_notas`, `_first` | Ayudantes pequeños (descuento de la línea, tasa de IVA, notas, primer valor no vacío)            |
 | `PedidoTransformado` / `TransformResult`      | "Cajas" con el resultado: filas + alertas (de un pedido / de todos)                                 |
 
@@ -338,10 +360,23 @@ reemplaza completo (escritura atómica) es lo más seguro frente a la sincroniza
 base SQLite a medio escribir podría subirse corrupta. Una sola máquina debe ejecutar la
 tarea programada.
 
-### `reconciliation/` y `erp/`
+### `reconciliation/siesa_export.py` — leer el exporte de Siesa
 
-Carpetas reservadas para las fases 2 y 3. Solo contienen un `__init__.py` que describe lo
-que irá ahí.
+**Para qué:** sacar de un Excel o CSV exportado de Siesa la lista de números de pedido
+(`_num_docto_referencia`). Es tolerante a cómo venga el archivo: busca la fila de
+encabezados en las primeras 20 filas, acepta el nombre de la columna con o sin `_` o en
+mayúsculas, y convierte `#1006` o `1006.0` en `1006`.
+
+### `reconciliation/run.py` — el cruce
+
+**Para qué:** juntar los pedidos de los reportes oficiales de la fase 1 y marcar cada uno
+como `EN_SIESA` o `FALTA_EN_SIESA`. Escribe `data/reconciliation/conciliacion_<fecha>.xlsx`
+con los faltantes primero.
+
+### `erp/`
+
+Carpeta reservada para la fase 3 (generar las plantillas de Siesa). La estructura de las
+plantillas está en `docs/plantillas_siesa.md`.
 
 ---
 
@@ -384,6 +419,8 @@ puede probar un 429, un 500 o un token vencido sin depender de la tienda real.
 | `test_fulfillment.py`   | La bodega por línea y qué pasa si falta el permiso                                                                 |
 | `test_extract.py`       | El JSONL y el manifiesto de una corrida, el aviso cuando el conteo no cuadra y que no se sobrescriba una extracción |
 | `test_state.py`         | Watermark, ventana incremental y registro de pedidos reportados                                                      |
+| `test_catalogos.py`     | Bodegas y ciudades de Siesa: tildes, apóstrofos, nombres repetidos y casos que no se adivinan                      |
+| `test_reconciliation.py` | Fase 2 con exportes sintéticos: filas de título, CSV con `;`, referencias `1006.0`, faltantes y `--strict`       |
 | `test_normalize.py`     | Cada función de limpieza con muchos casos (cédulas, NIT, teléfonos, apellidos)                                    |
 | `test_siesa_lines.py`   | El pedido#1006 de punta a punta: filas, envío, cédula, exclusiones, alertas, aislamiento de errores y ledger    |
 | `test_transform_run.py` | Que se escriban el CSV, el Excel y el log de alertas, y la validación del manifiesto                               |
@@ -410,7 +447,10 @@ Conviene correrlas después de cada cambio: si algo se rompe, la prueba lo indic
 
 | Quiero...                                  | Archivo                                                                                 |
 | ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| Cambiar la regla para identificar un NIT   | `transform/normalize.py` → `parse_documento`                                       |
+| Cambiar la regla para identificar un NIT   | `transform/normalize.py` → `tipo_por_formato`                                      |
+| Agregar una bodega nueva de Shopify        | `catalogos/bodegas_siesa.csv` (una fila; sin tocar código)                          |
+| Corregir el código de una ciudad           | `catalogos/ciudades_siesa.csv`                                                      |
+| Cambiar la tolerancia del total            | `transform/siesa_lines.py` → `TOLERANCIA_TOTAL`                                    |
 | Agregar o quitar una columna del reporte   | `transform/siesa_lines.py` → `COLUMNS` y `order_to_lines`                        |
 | Cambiar qué estados de pago pasan a Siesa | `transform/siesa_lines.py` → `DEFAULT_ESTADOS_PAGO` (o `--estados-pago`)         |
 | Agregar una alerta nueva                   | `transform/alertas.py` (descripción) + `transform/siesa_lines.py` (cuándo ocurre) |

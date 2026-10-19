@@ -22,7 +22,7 @@ def _fo_payload():
 def test_fetch_guarda_solo_lo_necesario(client):
     responses.get(FO_URL, json=_fo_payload())
     fos = fetch_fulfillment_orders(client, ORDER_ID)
-    assert fos[0]["assigned_location"] == {"location_id": 80001, "name": "Bodega Principal Medellín"}
+    assert fos[0]["assigned_location"] == {"location_id": 80001, "name": "D'Luchi PT Guarne"}
     assert "destination" not in fos[0]  # Dirección del cliente: no se duplica
 
 

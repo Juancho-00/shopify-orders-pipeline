@@ -4,18 +4,19 @@ Línea de comandos: lo que se ejecuta al escribir ``shopify-pipeline ...`` en la
 QUÉ HACE
     1. Lee los argumentos (``--days``, ``--since``, ``--codigo-envio``...).
     2. Carga el ``.env`` y configura los logs.
-    3. Llama al orquestador que corresponda (``extract`` o ``transform``).
-    4. Convierte cualquier error en un código de salida (0, 1, 2 o 3) para que una tarea
+    3. Llama al orquestador que corresponda (``extract``, ``transform`` o ``conciliar``).
+    4. Convierte cualquier error en un código de salida (0 a 5) para que una tarea
        programada sepa si la corrida salió bien.
 
     Este archivo NO contiene lógica de negocio: solo traduce lo que escribe el usuario a
-    llamadas a ``extract.py`` y ``transform/run.py``.
+    llamadas a ``extract.py``, ``transform/run.py`` y ``reconciliation/run.py``.
 
     shopify-pipeline extract --days 7
     shopify-pipeline extract --since 2026-10-01 --until 2026-10-08 --status any
     shopify-pipeline extract --incremental          # tarea programada: retoma desde la última corrida buena
     shopify-pipeline extract --days 3 --filtrar-por actualizacion   # captura pagos confirmados tarde
     shopify-pipeline transform                      # rehace el reporte Siesa de la última extracción
+    shopify-pipeline conciliar                      # fase 2: ¿los pedidos reportados ya están en Siesa?
 
 Logs (en --log-dir, por defecto data/logs):
     shopify_pipeline_AAAAMMDD.log   # bitácora de cada ejecución del día
@@ -25,7 +26,8 @@ Códigos de salida:
     0  éxito
     1  error transitorio (red / Shopify) tras agotar reintentos
     2  error de configuración o credenciales (no se arregla reintentando)
-    3  extracción completa pero el conteo no cuadró contra Shopify (--strict)
+    3  extracción completa pero el conteo no cuadró contra Shopify (--strict), o
+       (conciliar --strict) hay pedidos reportados que no están en Siesa
     4  error de datos: archivo crudo dañado, extracción incompleta, o (con --strict)
        pedidos que no se pudieron transformar
     5  error inesperado (bug): revisar la bitácora; reintentar no sirve
@@ -38,7 +40,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,12 @@ from shopify_pipeline.config import ShopifyConfig, load_env_file
 from shopify_pipeline.exceptions import CONFIGURATION_ERRORS, ConfigError, DataError, ShopifyError
 from shopify_pipeline.extract import DEFAULT_OUTPUT_DIR, run_extraction
 from shopify_pipeline.logs import setup_logging
+from shopify_pipeline.reconciliation.run import (
+    DEFAULT_EXPORTES_DIR,
+    DEFAULT_RECONCILIATION_DIR,
+    conciliar,
+)
+from shopify_pipeline.reconciliation.siesa_export import ultimo_exporte
 from shopify_pipeline.shopify.client import ShopifyClient
 from shopify_pipeline.shopify.orders import VALID_STATUSES, OrderFilter
 from shopify_pipeline.state import DEFAULT_STATE_DIR, Ledger, incremental_window, save_watermark
@@ -95,8 +103,8 @@ def _add_siesa_options(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("reporte Siesa")
     g.add_argument(
         "--codigo-envio",
-        default=os.environ.get("SIESA_CODIGO_ENVIO", "ENVIO"),
-        help="Referencia del ítem de envío en Siesa (default: $SIESA_CODIGO_ENVIO o ENVIO).",
+        default=os.environ.get("SIESA_CODIGO_ENVIO", "SERV01"),
+        help="Referencia del ítem de envío en Siesa (default: $SIESA_CODIGO_ENVIO o SERV01).",
     )
     g.add_argument(
         "--estados-pago",
@@ -192,6 +200,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Código 3 si la extracción no cuadró; 4 si hay pedidos que no se pudieron transformar.",
     )
     _add_siesa_options(tr)
+
+    co = sub.add_parser("conciliar", help="Fase 2: verifica que los pedidos reportados existan en Siesa.")
+    co.add_argument(
+        "--exporte",
+        type=Path,
+        default=None,
+        help="Exporte de pedidos de Siesa (.xlsx/.csv). Default: el más reciente de --exportes-dir.",
+    )
+    co.add_argument("--exportes-dir", type=Path, default=DEFAULT_EXPORTES_DIR)
+    co.add_argument(
+        "--columna",
+        default=None,
+        help="Columna del exporte con el número de pedido (default: _num_docto_referencia).",
+    )
+    co.add_argument(
+        "--desde",
+        type=_parse_date,
+        default=None,
+        help="Solo pedidos comprados desde esta fecha YYYY-MM-DD (default: últimos 30 días).",
+    )
+    co.add_argument("--processed-dir", type=Path, default=DEFAULT_PROCESSED_DIR)
+    co.add_argument("--output-dir", type=Path, default=DEFAULT_RECONCILIATION_DIR)
+    co.add_argument(
+        "--strict", action="store_true", help="Código 3 si algún pedido reportado no está en Siesa."
+    )
     return parser
 
 
@@ -321,6 +354,15 @@ def _cmd_transform(args: argparse.Namespace) -> int:
     return _codigo_strict(args, run.reconciled, run.result.errores)
 
 
+def _cmd_conciliar(args: argparse.Namespace) -> int:
+    exporte = args.exporte or ultimo_exporte(args.exportes_dir)
+    if not exporte.exists():
+        raise ConfigError(f"No existe el archivo {exporte}.")
+    desde = args.desde.date() if args.desde else datetime.now(BOGOTA).date() - timedelta(days=30)
+    resultado = conciliar(exporte, args.processed_dir, args.output_dir, desde, args.columna)
+    return EXIT_UNRECONCILED if args.strict and resultado.faltantes else EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     # Paso 1: cargar el .env ANTES de leer los argumentos, porque el valor por defecto de
     # --codigo-envio sale de la variable SIESA_CODIGO_ENVIO definida en el .env.
@@ -339,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_extract(args)
         if args.command == "transform":
             return _cmd_transform(args)
+        if args.command == "conciliar":
+            return _cmd_conciliar(args)
     except CONFIGURATION_ERRORS as exc:
         logger.error("Error de configuración/credenciales: %s", exc)
         return EXIT_CONFIG

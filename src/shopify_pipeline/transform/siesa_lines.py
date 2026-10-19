@@ -11,7 +11,14 @@ Reglas principales (detalle en ``docs/mapeo_siesa.md``):
   del cliente (``customer``).
 * Cédula/NIT: viene en ``billing_address.company`` (respaldo: ``shipping_address.company``).
 * Envío: si el valor cobrado es mayor a cero, se agrega una línea con la referencia
-  configurada (por defecto ``ENVIO``).
+  configurada (por defecto ``SERV01``, R-08), con IVA incluido (R-07) y la misma bodega
+  de los productos.
+* Precios, en pesos enteros (Siesa no maneja decimales, R-23): ``precio_unitario`` es el
+  precio del ítem y ``precio_neto`` el que pagó el cliente con el descuento aplicado. Siesa
+  no recibe descuentos (R-13): a Siesa se sube ``precio_neto``.
+* Bodega y ciudad se traducen a los códigos de Siesa con los catálogos de
+  ``shopify_pipeline/catalogos/`` (R-09, R-11). El tipo de documento sale como ``C`` o
+  ``N`` (R-10).
 * Solo pasan pedidos con pago confirmado. Los cancelados y de prueba se excluyen.
 * Un pedido que ya salió en un reporte anterior no se repite (registro de reportados).
 * Nada se descarta en silencio: las exclusiones, los datos faltantes o dudosos y los
@@ -31,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from shopify_pipeline.exceptions import DataError
 from shopify_pipeline.shopify.fulfillment import FULFILLMENT_KEY, location_by_line_item
 from shopify_pipeline.transform.alertas import Evento
+from shopify_pipeline.transform.catalogos import codigo_bodega, codigo_ciudad
 from shopify_pipeline.transform.normalize import (
     TWO_PLACES,
     clean_text,
@@ -99,8 +107,10 @@ COLUMNS: tuple[str, ...] = (
     "primer_apellido",
     "segundo_apellido",
     "direccion",
+    "direccion_complemento",
     "ciudad",
     "departamento",
+    "codigo_ciudad_siesa",
     "codigo_postal",
     "pais",
     "telefono",
@@ -112,9 +122,11 @@ COLUMNS: tuple[str, ...] = (
     "descripcion",
     "id_bodega_shopify",
     "bodega",
+    "bodega_siesa",
     "cantidad",
     "precio_unitario",
     "descuento_linea",
+    "precio_neto",
     "valor_total_linea",
     "tasa_iva",
     "precio_incluye_iva",
@@ -122,8 +134,16 @@ COLUMNS: tuple[str, ...] = (
 )
 
 NUMERIC_COLUMNS = frozenset(
-    {"cantidad", "precio_unitario", "descuento_linea", "valor_total_linea", "tasa_iva"}
+    {"cantidad", "precio_unitario", "descuento_linea", "precio_neto", "valor_total_linea", "tasa_iva"}
 )
+
+# Tipo de documento interno → código de identificación en Siesa (R-10).
+TIPO_DOC_SIESA: dict[str, str] = {"CC": "C", "NIT": "N"}
+# El envío lleva IVA del 19 % incluido en su valor (R-07), aunque Shopify no lo desglose.
+IVA_ENVIO = Decimal("0.1900")
+# Diferencia máxima aceptada entre la suma de las líneas y el total de Shopify (R-24).
+TOLERANCIA_TOTAL = Decimal("50")
+UN_PESO = Decimal("1")
 
 # Estados de pago de Shopify que cuentan como "pago confirmado".
 #   paid               → pagado.
@@ -136,7 +156,7 @@ DEFAULT_ESTADOS_PAGO: frozenset[str] = frozenset({"paid", "partially_refunded"})
 
 @dataclass(frozen=True)
 class SiesaLinesOptions:
-    codigo_envio: str = "ENVIO"
+    codigo_envio: str = "SERV01"
     estados_pago: frozenset[str] | None = DEFAULT_ESTADOS_PAGO  # None = no filtra por pago
     incluir_cancelados: bool = False
     incluir_pruebas: bool = False
@@ -183,6 +203,11 @@ def _first(*values: object) -> object:
         if value not in (None, ""):
             return value
     return None
+
+
+def _pesos(valor: Decimal) -> Decimal:
+    """Redondea a pesos enteros: Siesa no maneja decimales (R-23). ``12294.34`` → ``12294``."""
+    return valor.quantize(UN_PESO, ROUND_HALF_UP)
 
 
 def _tasa(tax_lines: list[dict[str, Any]] | None) -> Decimal:
@@ -241,8 +266,12 @@ def _cliente(order: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
 
     doc = parse_documento(_first(billing.get("company"), shipping.get("company"), default.get("company")))
     alertas.extend(doc.alertas)
+    tipo_siesa = TIPO_DOC_SIESA.get(doc.tipo, "")
+    if doc.tipo and not tipo_siesa:  # CE o pasaporte: Siesa aún no tiene código definido.
+        alertas.append("TIPO_DOCUMENTO_SIN_CODIGO_SIESA")
 
-    direccion = " ".join(p for p in (clean_text(addr.get("address1")), clean_text(addr.get("address2"))) if p)
+    # Separadas: la plantilla de Siesa lleva la dirección y el complemento en campos distintos.
+    direccion, complemento = clean_text(addr.get("address1")), clean_text(addr.get("address2"))
     if not direccion:
         alertas.append("SIN_DIRECCION")
 
@@ -262,8 +291,13 @@ def _cliente(order: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     if not email:
         alertas.append("SIN_EMAIL")
 
+    ciudad, departamento = clean_text(addr.get("city")), clean_text(addr.get("province"))
+    codigo_ciudad_siesa = codigo_ciudad(ciudad, departamento, clean_text(addr.get("province_code")))
+    if not codigo_ciudad_siesa:
+        alertas.append("CIUDAD_SIN_CODIGO")
+
     datos = {
-        "tipo_documento": doc.tipo,
+        "tipo_documento": tipo_siesa,
         "numero_documento": doc.numero,
         "digito_verificacion": doc.dv,
         "primer_nombre": primer_nombre,
@@ -271,8 +305,10 @@ def _cliente(order: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         "primer_apellido": primer_apellido,
         "segundo_apellido": segundo_apellido,
         "direccion": direccion,
-        "ciudad": clean_text(addr.get("city")),
-        "departamento": clean_text(addr.get("province")),
+        "direccion_complemento": complemento,
+        "ciudad": ciudad,
+        "departamento": departamento,
+        "codigo_ciudad_siesa": codigo_ciudad_siesa,
         "codigo_postal": clean_text(addr.get("zip")),
         "pais": clean_text(addr.get("country_code")),
         "telefono": telefono,
@@ -297,7 +333,10 @@ def order_to_lines(order: dict[str, Any], options: SiesaLinesOptions | None = No
 
     cliente, alertas_cliente = _cliente(order)
     for codigo in alertas_cliente:
-        alerta(codigo)
+        detalle = ""
+        if codigo == "CIUDAD_SIN_CODIGO":
+            detalle = f"{cliente['ciudad'] or '(vacía)'} / {cliente['departamento'] or '(vacío)'}"
+        alerta(codigo, detalle=detalle)
     if order.get("cancelled_at"):
         alerta("PEDIDO_CANCELADO")
 
@@ -329,11 +368,16 @@ def order_to_lines(order: dict[str, Any], options: SiesaLinesOptions | None = No
             alerta("SIN_SKU", numero_linea, detalle=clean_text(item.get("name")))
 
         bodega_id, bodega = bodegas.get(item.get("id"), (None, ""))
+        bodega_siesa = codigo_bodega(bodega) if bodega else ""
         if not bodega:
             alerta("SIN_BODEGA" if has_fulfillment else "BODEGA_NO_CONSULTADA", numero_linea, referencia)
+        elif not bodega_siesa:
+            alerta("BODEGA_SIN_EQUIVALENCIA", numero_linea, referencia, detalle=bodega)
 
         precio = to_decimal(item.get("price"))
         descuento = _descuento(item, cantidad)
+        # Siesa no recibe el descuento (R-13): se envía el precio neto por unidad, en pesos enteros.
+        neto = _pesos((precio * cantidad - descuento) / cantidad)
         out.rows.append(
             base
             | {
@@ -343,10 +387,12 @@ def order_to_lines(order: dict[str, Any], options: SiesaLinesOptions | None = No
                 "descripcion": clean_text(item.get("name") or item.get("title")),
                 "id_bodega_shopify": str(bodega_id or ""),
                 "bodega": bodega,
+                "bodega_siesa": bodega_siesa,
                 "cantidad": int(cantidad),
-                "precio_unitario": precio,
-                "descuento_linea": descuento,
-                "valor_total_linea": (precio * cantidad - descuento).quantize(TWO_PLACES, ROUND_HALF_UP),
+                "precio_unitario": _pesos(precio),
+                "descuento_linea": _pesos(descuento),
+                "precio_neto": neto,
+                "valor_total_linea": neto * cantidad,
                 "tasa_iva": _tasa(item.get("tax_lines")),
             }
         )
@@ -358,6 +404,10 @@ def order_to_lines(order: dict[str, Any], options: SiesaLinesOptions | None = No
         valor = to_decimal(_first(shipping.get("discounted_price"), shipping.get("price")))
         if valor <= 0:
             continue
+        precio = max(to_decimal(shipping.get("price")), valor)
+        neto = _pesos(valor)
+        # El envío sale de la misma bodega que los productos del pedido.
+        primera = next((r for r in out.rows if r["tipo_linea"] == "PRODUCTO"), None)
         out.rows.append(
             base
             | {
@@ -365,13 +415,15 @@ def order_to_lines(order: dict[str, Any], options: SiesaLinesOptions | None = No
                 "tipo_linea": "ENVIO",
                 "referencia": options.codigo_envio,
                 "descripcion": clean_text(shipping.get("title")) or "Envío",
-                "id_bodega_shopify": "",
-                "bodega": "",
+                "id_bodega_shopify": primera["id_bodega_shopify"] if primera else "",
+                "bodega": primera["bodega"] if primera else "",
+                "bodega_siesa": primera["bodega_siesa"] if primera else "",
                 "cantidad": 1,
-                "precio_unitario": valor,
-                "descuento_linea": Decimal("0.00"),
-                "valor_total_linea": valor,
-                "tasa_iva": _tasa(shipping.get("tax_lines")),
+                "precio_unitario": _pesos(precio),
+                "descuento_linea": _pesos(precio - valor),
+                "precio_neto": neto,
+                "valor_total_linea": neto,
+                "tasa_iva": _tasa(shipping.get("tax_lines")) or IVA_ENVIO,
             }
         )
 
@@ -384,13 +436,14 @@ def order_to_lines(order: dict[str, Any], options: SiesaLinesOptions | None = No
 def _diferencia_total(order: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     """
     Control de calidad: con precios IVA incluido, la suma de las líneas debe ser igual al
-    total del pedido en Shopify (tolerancia de $1). Devuelve el detalle si no cuadra.
+    total del pedido en Shopify, con la tolerancia de R-24 ($50: los precios se redondean a
+    pesos enteros porque Siesa no maneja decimales). Devuelve el detalle si no cuadra.
     """
     if not rows or not order.get("taxes_included"):
         return ""
     total_shopify = to_decimal(_first(order.get("current_total_price"), order.get("total_price")))
     total_lineas = sum((r["valor_total_linea"] for r in rows), Decimal("0.00"))
-    if abs(total_shopify - total_lineas) <= Decimal("1.00"):
+    if abs(total_shopify - total_lineas) <= TOLERANCIA_TOTAL:
         return ""
     return f"Shopify {total_shopify} vs líneas {total_lineas}"
 

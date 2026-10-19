@@ -30,6 +30,10 @@ shopify-pipeline = "shopify_pipeline.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# Catálogos de equivalencias con Siesa (bodegas y ciudades).
+shopify_pipeline = ["catalogos/*.csv"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

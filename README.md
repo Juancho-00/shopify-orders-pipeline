@@ -5,17 +5,18 @@ Pipeline de integración **Shopify → Siesa** para Luisa Chimá S.A.S.
 | Fase | Descripción | Estado |
 |---|---|---|
 | 1. Extracción | Descarga los pedidos de Shopify y genera el reporte línea por línea para Siesa | ✅ Lista |
-| 2. Conciliación | Verifica que los pedidos extraídos de Shopify existan en Siesa | ⏳ Pendiente |
-| 3. Carga a Siesa | Crea clientes y pedidos faltantes en Siesa según sus plantillas | ⏳ Pendiente |
+| 2. Conciliación | Verifica que los pedidos reportados existan en Siesa | ✅ Lista |
+| 3. Carga a Siesa | Genera las plantillas de clientes y pedidos para Siesa | 🟡 Estructura analizada ([plantillas_siesa.md](docs/plantillas_siesa.md)) |
 
 ```
                   (1) extract                                 (1) transform
 Shopify ──────────────────────────► data/raw/...jsonl ─────────────────────► data/processed/siesa/
   pedidos + bodega por pedido        + manifest.json                         pedidos_siesa_<run>.csv / .xlsx
                                                                                       │
-                                                    (2) reconcile ◄───────────────────┘
-                                                          │
-                                                    (3) load ──► Siesa
+          data/siesa/exportes/ ──► (2) conciliar ◄──────────────────────┘
+          (exporte de Siesa)            │
+                                        ▼
+                                  data/reconciliation/   ──►  (3) plantillas ──► Siesa
 ```
 
 ---
@@ -36,8 +37,10 @@ shopify-orders-pipeline/
 │   │   ├── client.py        # HTTP: reintentos, rate limiting, paginación por Link header
 │   │   ├── orders.py        # Filtros de pedidos y extracción
 │   │   └── fulfillment.py   # Bodega de salida de cada línea (fulfillment orders)
+│   ├── catalogos/           # Tablas de equivalencia Siesa: bodegas y ciudades (CSV)
 │   ├── transform/
 │   │   ├── normalize.py     # Nombres, apellidos, cédula/NIT, teléfono, fechas, montos
+│   │   ├── catalogos.py     # Bodega Shopify → código Siesa; ciudad → código 169+DANE
 │   │   ├── siesa_lines.py   # Pedido → filas para Siesa (productos + envío) y exclusiones
 │   │   ├── alertas.py       # Catálogo de alertas y exclusiones del log
 │   │   └── run.py           # JSONL crudo → CSV + Excel + log de alertas
@@ -47,8 +50,13 @@ shopify-orders-pipeline/
 │   │   └── tabular.py       # CSV y Excel
 │   ├── extract.py           # Orquestación de la extracción + manifiesto de la corrida
 │   ├── state.py             # Estado entre corridas: watermark y pedidos ya reportados
-│   ├── reconciliation/      # Fase 2 (pendiente)
+│   ├── reconciliation/      # Fase 2: exporte de Siesa vs. reportes de la fase 1
+│   │   ├── siesa_export.py  # Lee el exporte (xlsx/csv) y saca _num_docto_referencia
+│   │   └── run.py           # Cruce y reporte de conciliación
 │   └── erp/                 # Fase 3 (pendiente)
+├── scripts/
+│   ├── ejecutar_pipeline.ps1 # Corrida diaria (la usa la tarea programada)
+│   └── registrar_tarea.ps1   # Crea la tarea en el Programador de tareas de Windows
 ├── tests/                   # Pruebas sin red (Shopify simulado con `responses`)
 │   └── fixtures/            # Respuestas de ejemplo de Shopify (anonimizadas)
 ├── templates/erp/           # Plantillas de carga del ERP (fase 3; no se versionan)
@@ -56,6 +64,9 @@ shopify-orders-pipeline/
 ├── docs/
 │   ├── guia_codigo.md       # Para qué sirve cada archivo .py, explicado paso a paso
 │   ├── mapeo_siesa.md       # Origen y regla de cada columna del reporte (para el ticket de Siesa)
+│   ├── reglas_negocio.md    # Reglas de negocio decididas y pendientes (fases 1, 2 y 3)
+│   ├── plantillas_siesa.md  # Columnas de las plantillas de clientes y pedidos de Siesa
+│   ├── ejecucion_programada.md # Cómo dejarlo corriendo solo cada día
 │   └── decisiones.md        # Decisiones técnicas y su motivo
 ├── .github/workflows/ci.yml # Lint + pruebas en cada push / PR
 ├── .env.example             # Plantilla de credenciales (sin secretos)
@@ -105,11 +116,13 @@ pytest
 
 1. Copia `.env.example` como `.env` y completa los valores. `.env` nunca se sube al repo.
 2. Usa el **dominio interno** `tu-tienda.myshopify.com`, no el dominio público.
-3. Elige **uno** de los dos modos de autenticación:
+3. **Modo definido: Client Credentials.** Complete `SHOPIFY_CLIENT_ID` y
+   `SHOPIFY_CLIENT_SECRET` y deje `SHOPIFY_ACCESS_TOKEN` comentado (si se define, tiene
+   prioridad). El token estático se conserva en el código solo como respaldo.
 
 | Modo | Cuándo | Variables |
 |---|---|---|
-| **Client Credentials** (recomendado) | Apps creadas en el **Dev Dashboard** (obligatorio para apps nuevas desde el 1-ene-2026). El token dura ~24 h y el pipeline lo renueva solo. | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` |
+| **Client Credentials** (✅ el que se usa) | Apps creadas en el **Dev Dashboard** (obligatorio para apps nuevas desde el 1-ene-2026). El token dura ~24 h y el pipeline lo renueva solo. | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` |
 | **Token estático** | Custom app *legacy* creada en el admin de Shopify antes de 2026. Token permanente `shpat_...`. | `SHOPIFY_ACCESS_TOKEN` |
 
 ### Crear la app en el Dev Dashboard
@@ -249,21 +262,26 @@ El detalle de cada columna (origen en Shopify y regla) está en
 
 Ejemplo con el pedido de prueba #1006 (datos del cliente anonimizados):
 
-| documento_referencia | tipo_documento | numero_documento | primer_nombre | primer_apellido | tipo_linea | referencia | bodega | cantidad | precio_unitario |
-|---|---|---|---|---|---|---|---|---|---|
-| 1006 | CC | 1017000001 | Laura | Restrepo | PRODUCTO | KITK0108 | Bodega Principal Medellín | 1 | 89999.00 |
-| 1006 | CC | 1017000001 | Laura | Restrepo | ENVIO | ENVIO | | 1 | 12294.34 |
+| documento_referencia | tipo_documento | numero_documento | tipo_linea | referencia | bodega_siesa | codigo_ciudad_siesa | cantidad | precio_unitario | descuento_linea | precio_neto |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1006 | C | 1017000001 | PRODUCTO | KITK0108 | LCD01 | 16905001 | 1 | 89999 | 0 | 89999 |
+| 1006 | C | 1017000001 | ENVIO | SERV01 | LCD01 | 16905001 | 1 | 12294 | 0 | 12294 |
+
+`precio_unitario` es el precio del ítem; `precio_neto` es el que se sube a Siesa (con el
+descuento aplicado). Todos los valores van en pesos enteros.
 
 Reglas clave:
 
 - **Solo pago confirmado:** se extraen todos los pedidos, pero al reporte solo pasan los de
   estado `paid` o `partially_refunded`. Cancelados y de prueba también se excluyen.
 - **Cédula / NIT:** se lee de `billing_address.company` (respaldo: `shipping_address.company`),
-  se limpia (sin puntos ni espacios) y se deduce si es CC o NIT. La regla para identificar
-  NIT es provisional: los NIT deducidos solo por formato quedan como `NIT_POR_VERIFICAR`.
-- **Envío:** solo genera línea si el valor cobrado es mayor a cero.
-- **Precios:** producto y envío van con IVA incluido, tal como los cobra Shopify.
-- **Control de totales:** la suma de las líneas debe ser igual al total del pedido en Shopify.
+  se limpia (sin puntos ni espacios) y se deduce si es CC o NIT por su formato (R-06):
+  NIT = 9 dígitos con prefijo 800/900/901; CC = 7, 8 o 10 dígitos. Sale como `C` o `N`.
+- **Envío:** solo genera línea si el valor cobrado es mayor a cero; código `SERV01`.
+- **Precios:** producto y envío van con IVA incluido, en pesos enteros. A Siesa se sube
+  `precio_neto` (sin descuento aparte).
+- **Bodega y ciudad:** se traducen a códigos Siesa con `catalogos/` (R-09, R-11).
+- **Control de totales:** la suma de las líneas debe cuadrar con el total de Shopify (±$50).
 - **Reembolso parcial:** si se reembolsaron unidades de una línea, la cantidad es la vigente
   (`current_quantity`) y el descuento se prorratea a esa cantidad.
 - **Sin duplicados entre reportes:** un pedido que ya salió en el reporte de otra corrida
@@ -314,6 +332,19 @@ estuvo apagado un día, ese día se pierde. `--incremental` lo evita:
 > **Una sola máquina** debe ejecutar la tarea programada. `data/` está en Google Drive: si
 > dos equipos escriben el estado al mismo tiempo, Drive crea copias en conflicto
 > (`reportados (1).json`) y el registro de pedidos reportados deja de ser confiable.
+
+### Ejecución diaria automática
+
+En el equipo que ejecutará el pipeline (uno solo), con el Programador de tareas de Windows:
+
+```powershell
+.\scripts\registrar_tarea.ps1 -Python "<ruta al python.exe del entorno>" -Hora "06:00"
+```
+
+La tarea corre `extract --incremental --strict`, espera a que Google Drive monte la unidad,
+reintenta una vez si hay un error temporal y deja el historial en `data\logs\ejecuciones.csv`.
+Requisitos, revisión diaria y qué hacer con cada resultado en
+[`docs/ejecucion_programada.md`](docs/ejecucion_programada.md).
 
 ### Códigos de salida
 
@@ -367,52 +398,42 @@ estuvo apagado un día, ese día se pierde. `--incremental` lo evita:
 
 ---
 
-## Fase 2: conciliación con Siesa (pendiente)
+## Fase 2: conciliación con Siesa
 
-Objetivo: comprobar que cada pedido extraído de Shopify exista en Siesa. La llave de cruce
-es `documento_referencia` (consecutivo de Shopify, p. ej. `1006`).
+Verifica que cada pedido reportado en la fase 1 exista en Siesa (reglas R-20 a R-22). La
+llave es `documento_referencia` del reporte (número Shopify sin `#`) contra
+`_num_docto_referencia` de Siesa.
 
-Diseño previsto (`src/shopify_pipeline/reconciliation/`):
+1. Exporte de Siesa el reporte de pedidos a Excel (o CSV) y guárdelo en
+   `data/siesa/exportes/`. Basta con dos columnas: `Nro documento` (tipo de documento y
+   consecutivo de Siesa, p. ej. `CPM-00003210`) y `_num_docto_referencia` (número del
+   pedido Shopify). Solo la segunda es obligatoria; la primera se copia al resultado.
+2. Ejecute:
 
-1. Leer la última extracción de `data/raw/shopify/orders/` usando su manifiesto, y el
-   registro de pedidos ya reportados (`data/state/reportados.json`).
-2. Consultar en Siesa los pedidos de la misma ventana de fechas.
-3. Cruzar por la llave acordada (p. ej. `order.name` `#1001` o `order.id` de Shopify
-   contra el campo de referencia externa de Siesa).
-4. Clasificar cada pedido:
-   - **En ambos:** conciliado.
-   - **Solo en Shopify:** faltante en Siesa → entrada de la fase 3.
-   - **Solo en Siesa:** revisar (pedido manual o error de referencia).
-   - **Con diferencias:** total, estado o cliente distintos.
-5. Generar el reporte en `data/reconciliation/<run_id>/`.
+```powershell
+shopify-pipeline conciliar                       # último exporte, pedidos de los últimos 30 días
+shopify-pipeline conciliar --desde 2026-10-01    # desde una fecha de compra
+shopify-pipeline conciliar --exporte "C:\ruta\pedidos.xlsx" --columna "Docto referencia"
+shopify-pipeline conciliar --strict              # código 3 si falta algún pedido en Siesa
+```
 
-**Información pendiente:**
+3. Revise `data/reconciliation/conciliacion_<fecha>.xlsx`. Los pedidos `FALTA_EN_SIESA`
+   aparecen primero; los `EN_SIESA` ya están cargados y muestran su `documento_siesa`.
 
-- [ ] Forma de acceso a Siesa (API, consulta a base de datos, exportación de archivo).
-- [ ] Campo de Siesa que guarda el documento de referencia de Shopify.
-- [ ] Reglas de comparación: qué diferencias en totales o estados se toleran.
+Solo cuentan los reportes oficiales (`pedidos_siesa_<run_id>.csv`). Los `_revision` se
+ignoran porque no se cargan a Siesa.
 
 ---
 
-## Fase 3: creación de clientes y pedidos en Siesa (pendiente)
+## Fase 3: creación de clientes y pedidos en Siesa (en diseño)
 
-Objetivo: crear en Siesa los clientes y pedidos que la fase 2 marque como faltantes,
-usando las plantillas de carga de Siesa.
+Genera dos plantillas Excel para cargar en Siesa: primero **clientes** y luego **pedidos**
+(R-30). El cliente se sube con cada pedido, aunque ya exista (R-31). Un pedido al que le
+falte un dato obligatorio no se sube (R-34).
 
-Diseño previsto (`src/shopify_pipeline/erp/`):
-
-1. Tomar los pedidos "solo en Shopify" de la fase 2.
-2. Crear primero los clientes que no existan; después, los pedidos.
-3. Mapear cada campo de Shopify a la columna de la plantilla, validando tipo, longitud
-   y obligatoriedad antes de generar la carga.
-4. Generar los archivos de carga (o llamar la API de Siesa) de forma idempotente: volver
-   a ejecutar no debe duplicar clientes ni pedidos.
-
-**Información pendiente:**
-
-- [ ] Plantillas de cliente y de pedido (ver `templates/erp/README.md`).
-- [ ] Por columna: tipo de dato, longitud, obligatoriedad, origen en Shopify o valor fijo.
-- [ ] Llave para saber si un cliente ya existe (NIT / cédula / correo).
+La estructura de cada columna (origen, valor fijo y transformación) está en
+[docs/plantillas_siesa.md](docs/plantillas_siesa.md). El generador se construye cuando
+se resuelvan las preguntas abiertas de ese documento (R-32).
 
 ---
 

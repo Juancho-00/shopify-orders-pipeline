@@ -87,6 +87,28 @@ def calcular_dv_nit(numero: str) -> str:
     return str(residuo if residuo in (0, 1) else 11 - residuo)
 
 
+PREFIJOS_NIT = ("800", "900", "901")
+
+
+def tipo_por_formato(numero: str) -> tuple[str, str]:
+    """Deduce el tipo de un documento sin prefijo. Devuelve ``(tipo, alerta)`` (R-06)."""
+    largo = len(numero)
+    if largo == 9 and numero.startswith(PREFIJOS_NIT):
+        return "NIT", ""
+    if largo == 9 and numero[0] in "89":
+        return "NIT", "NIT_POR_VERIFICAR"
+    if largo in (7, 8):
+        return "CC", ""
+    if largo == 10:  # Cédulas nuevas: cualquier número de 10 dígitos (1152469156, 1000…, 1100…).
+        return "CC", ""
+    return "", "TIPO_DOCUMENTO_NO_IDENTIFICADO"
+
+
+def _es_nit_con_dv_pegado(numero: str) -> bool:
+    """``9001234567``: NIT de 9 dígitos + su DV, escrito sin guion."""
+    return len(numero) == 10 and numero.startswith(PREFIJOS_NIT) and calcular_dv_nit(numero[:9]) == numero[9]
+
+
 def parse_documento(raw: object) -> Documento:
     """
     Interpreta el documento escrito por el cliente en el campo ``company``.
@@ -94,18 +116,18 @@ def parse_documento(raw: object) -> Documento:
     Acepta formatos como ``1152469156``, ``1.152.469.156``, ``CC 1152469156``,
     ``900123456-7`` o ``NIT 900.123.456``.
 
-    Tipo de documento:
+    Tipo de documento (regla R-06 de ``docs/reglas_negocio.md``):
       * Prefijo explícito (CC, NIT, CE, PP) → se respeta.
       * Con guion (``900123456-7``) → NIT con dígito de verificación.
-      * 9 dígitos que empiezan por 8 o 9 → NIT de empresa (rango asignado por la DIAN).
-      * Cualquier otro número → CC.
+      * 9 dígitos que empiezan por 800, 900 o 901 → NIT (el 95 % de los NIT).
+      * Otros 9 dígitos que empiezan por 8 o 9 → NIT, con alerta ``NIT_POR_VERIFICAR``.
+      * 7 u 8 dígitos → CC antigua.
+      * 10 dígitos → CC nueva. Excepción: si empieza por 800/900/901 y el último dígito es
+        el DV de los 9 primeros, es un NIT con el DV pegado (``9001234567``).
+      * Cualquier otro caso → sin tipo, con alerta ``TIPO_DOCUMENTO_NO_IDENTIFICADO``.
 
     Para un NIT sin DV, el DV se calcula. Si el cliente lo escribió y no coincide, se
     agrega la alerta ``DV_NIT_INVALIDO``.
-
-    REGLA PROVISIONAL: aún no está definido cómo identificar un NIT. Mientras tanto, un
-    NIT deducido solo por la regla de 9 dígitos (sin prefijo ni guion) se marca con
-    ``NIT_POR_VERIFICAR`` para revisarlo en el log de alertas.
     """
     text = clean_text(raw).upper()
     if not text:
@@ -131,20 +153,19 @@ def parse_documento(raw: object) -> Documento:
     numero = re.sub(r"\D", "", text)
 
     if not 5 <= len(numero) <= 11:
-        return Documento(tipo or "CC", numero, "", ("DOCUMENTO_INVALIDO",))
+        return Documento(tipo, numero, "", ("DOCUMENTO_INVALIDO",))
 
-    nit_inferido = False
+    alertas: list[str] = []
+    if not tipo and _es_nit_con_dv_pegado(numero):
+        tipo, numero, dv_escrito = "NIT", numero[:9], numero[9]
     if not tipo:
-        nit_inferido = len(numero) == 9 and numero[0] in "89"
-        tipo = "NIT" if nit_inferido else "CC"
-
+        tipo, alerta = tipo_por_formato(numero)
+        if alerta:
+            alertas.append(alerta)
     if tipo != "NIT":
-        return Documento(tipo, numero, "")
+        return Documento(tipo, numero, "", tuple(alertas))
 
     dv = calcular_dv_nit(numero)
-    alertas: list[str] = []
-    if nit_inferido:
-        alertas.append("NIT_POR_VERIFICAR")
     if dv_escrito and dv_escrito != dv:
         alertas.append("DV_NIT_INVALIDO")
     return Documento("NIT", numero, dv_escrito or dv, tuple(alertas))

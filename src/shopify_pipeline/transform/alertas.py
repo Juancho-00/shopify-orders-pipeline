@@ -26,7 +26,10 @@ DESCRIPCIONES: dict[str, str] = {
     "SIN_DOCUMENTO": "El cliente no registró cédula/NIT en el campo company",
     "DOCUMENTO_INVALIDO": "El documento no tiene entre 5 y 11 dígitos",
     "DV_NIT_INVALIDO": "El dígito de verificación escrito no coincide con el calculado",
-    "NIT_POR_VERIFICAR": "Clasificado como NIT solo por formato (9 dígitos que inician en 8 o 9)",
+    "NIT_POR_VERIFICAR": "Clasificado como NIT por formato, pero no inicia en 800, 900 ni 901",
+    "TIPO_DOCUMENTO_NO_IDENTIFICADO": "El formato no corresponde a una CC ni a un NIT (ver regla R-06)",
+    "TIPO_DOCUMENTO_SIN_CODIGO_SIESA": "CE o pasaporte: Siesa aún no tiene código definido",
+    "CIUDAD_SIN_CODIGO": "La ciudad no se encontró en la tabla de ciudades de Siesa",
     "SIN_NOMBRE": "Pedido sin nombre del cliente",
     "SIN_APELLIDO": "Pedido sin apellido del cliente",
     "SIN_DIRECCION": "Pedido sin dirección",
@@ -38,6 +41,7 @@ DESCRIPCIONES: dict[str, str] = {
     # Alertas de línea
     "SIN_SKU": "Producto sin referencia (SKU)",
     "SIN_BODEGA": "Shopify no tiene la línea asignada a una bodega",
+    "BODEGA_SIN_EQUIVALENCIA": "La bodega de Shopify no tiene código Siesa en catalogos/bodegas_siesa.csv",
     "BODEGA_NO_CONSULTADA": "No se consultó la bodega (--sin-bodega o falta de permiso)",
     # Exclusiones
     "PAGO_NO_CONFIRMADO": "Excluido: el pago no está confirmado",
