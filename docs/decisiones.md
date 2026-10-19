@@ -170,7 +170,7 @@ Registro breve de decisiones de diseño y su motivo.
 - **Consecuencia:** como `data/` vive en Google Drive, la tarea corre con el usuario que tiene
   Drive iniciado y solo con su sesión abierta; el script espera hasta 15 minutos a que G:
   esté disponible. Un solo equipo debe tener la tarea registrada.
-- **Pendiente:** equipo, usuario, hora y responsable de la revisión diaria.
+- **Definido el 2026-10-19:** ver decisión 025.
 
 ## 020 · Catálogos de bodegas y ciudades de Siesa en el paquete (2026-10-19)
 
@@ -228,3 +228,37 @@ Registro breve de decisiones de diseño y su motivo.
   último dígito coincide con el DV calculado.
 - **Exporte de Siesa:** confirmado con el exporte real: `Nro documento` (`CPM-00003210`) y
   `_num_docto_referencia`. La conciliación muestra el `Nro documento` como `documento_siesa`.
+
+## 025 · Equipo, usuario, hora y revisión de la tarea diaria (2026-10-19)
+
+- **Decisión:** la tarea corre en el equipo de Juan Pablo Quintero, con su usuario de Windows,
+  a las 6:30 a. m. El equipo se entrega con la tarea instalada. La revisión diaria la hace él
+  por ahora y después el asistente o un digitador; se escala a TI o al encargado del
+  e-commerce según el error. La exportación de Siesa para la conciliación la hace una persona;
+  a futuro se evaluará un agente de IA.
+- **Riesgo:** la tarea depende de que ese usuario de Windows y su cuenta de Google Drive sigan
+  activos después de la entrega. Si se desactivan, la tarea deja de correr sin avisar.
+
+## 026 · Hoja `Terceros` de la plantilla de clientes (2026-10-19)
+
+- **Decisión:** columnas definidas por TI (ver `plantillas_siesa.md`). Teléfono y celular sin
+  el indicativo `57`; país siempre `169`; fecha de nacimiento = fecha de la carga como número
+  `AAAAMMDD`; direcciones de máximo 40 caracteres repartidas en 3 campos sin partir palabras.
+  Comando `shopify-pipeline plantillas`, salida en `data/siesa/cargas/`.
+- **Una fila por cliente:** si un cliente compró varias veces en la misma corrida, se envía
+  una vez, con los datos del pedido más reciente (R-31 pide subirlo con cada compra; dentro de
+  un mismo archivo, repetirlo no aporta nada).
+- **Datos faltantes:** el tercero no se genera y el pedido queda con `TERCERO_INCOMPLETO`
+  (R-34). El log solo dice qué campo falta, nunca el dato del cliente.
+
+## 027 · Hojas `Clientes`, `Imptos y Reten` y `Ent. Dinamica Cliente` (2026-10-19)
+
+- **Decisión:** columnas definidas por TI (ver `plantillas_siesa.md`). Las tres hojas se arman
+  desde la fila de `Terceros`, para que los datos del cliente sean idénticos en las cuatro.
+  `Imptos y Reten` lleva 3 filas por cliente (46/1/1, 47/1/0, 47/41/1), agrupadas por clase
+  como en la plantilla de ejemplo.
+- **Formato:** se replica el de `terceros_vtex.xlsx`. Los documentos van como número y todo lo
+  demás como texto, incluidas las fechas `AAAAMMDD` (ajusta la 026, que guardaba la fecha de
+  nacimiento como número).
+- **Dirección en `Clientes`:** solo tiene 2 campos; el segundo une los campos 2 y 3 de
+  `Terceros` (normalmente, el complemento). Si no cabe en 40 caracteres: `DIRECCION_TRUNCADA`.

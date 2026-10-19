@@ -6,7 +6,7 @@ Pipeline de integración **Shopify → Siesa** para Luisa Chimá S.A.S.
 |---|---|---|
 | 1. Extracción | Descarga los pedidos de Shopify y genera el reporte línea por línea para Siesa | ✅ Lista |
 | 2. Conciliación | Verifica que los pedidos reportados existan en Siesa | ✅ Lista |
-| 3. Carga a Siesa | Genera las plantillas de clientes y pedidos para Siesa | 🟡 Estructura analizada ([plantillas_siesa.md](docs/plantillas_siesa.md)) |
+| 3. Carga a Siesa | Genera las plantillas de clientes y pedidos para Siesa | 🟡 En construcción: plantilla de clientes lista ([plantillas_siesa.md](docs/plantillas_siesa.md)) |
 
 ```
                   (1) extract                                 (1) transform
@@ -53,7 +53,7 @@ shopify-orders-pipeline/
 │   ├── reconciliation/      # Fase 2: exporte de Siesa vs. reportes de la fase 1
 │   │   ├── siesa_export.py  # Lee el exporte (xlsx/csv) y saca _num_docto_referencia
 │   │   └── run.py           # Cruce y reporte de conciliación
-│   └── erp/                 # Fase 3 (pendiente)
+│   └── erp/                 # Fase 3: plantillas de carga a Siesa (terceros, clientes, run)
 ├── scripts/
 │   ├── ejecutar_pipeline.ps1 # Corrida diaria (la usa la tarea programada)
 │   └── registrar_tarea.ps1   # Crea la tarea en el Programador de tareas de Windows
@@ -338,7 +338,7 @@ estuvo apagado un día, ese día se pierde. `--incremental` lo evita:
 En el equipo que ejecutará el pipeline (uno solo), con el Programador de tareas de Windows:
 
 ```powershell
-.\scripts\registrar_tarea.ps1 -Python "<ruta al python.exe del entorno>" -Hora "06:00"
+.\scripts\registrar_tarea.ps1 -Python "<ruta al python.exe del entorno>" -Hora "06:30"
 ```
 
 La tarea corre `extract --incremental --strict`, espera a que Google Drive monte la unidad,
@@ -425,15 +425,29 @@ ignoran porque no se cargan a Siesa.
 
 ---
 
-## Fase 3: creación de clientes y pedidos en Siesa (en diseño)
+## Fase 3: creación de clientes y pedidos en Siesa (en construcción)
 
 Genera dos plantillas Excel para cargar en Siesa: primero **clientes** y luego **pedidos**
 (R-30). El cliente se sube con cada pedido, aunque ya exista (R-31). Un pedido al que le
 falte un dato obligatorio no se sube (R-34).
 
 La estructura de cada columna (origen, valor fijo y transformación) está en
-[docs/plantillas_siesa.md](docs/plantillas_siesa.md). El generador se construye cuando
-se resuelvan las preguntas abiertas de ese documento (R-32).
+[docs/plantillas_siesa.md](docs/plantillas_siesa.md).
+
+**Listo:** plantilla de clientes con sus 4 hojas (`Terceros`, `Clientes`, `Imptos y Reten`,
+`Ent. Dinamica Cliente`).
+
+```powershell
+shopify-pipeline plantillas                    # usa el reporte más reciente de la fase 1
+shopify-pipeline plantillas --input data\processed\siesa\pedidos_siesa_<run_id>.csv
+```
+
+Escribe `data\siesa\cargas\terceros_<run_id>.xlsx` (un cliente por fila; 3 filas por cliente en
+`Imptos y Reten`) y
+`data\logs\plantillas_<run_id>.csv` con los pedidos que no se cargan por datos faltantes
+(`TERCERO_INCOMPLETO`) y las direcciones recortadas (`DIRECCION_TRUNCADA`).
+
+**Pendiente:** la plantilla de pedidos (`Pedidos` y `Movto Pedidos comercial`).
 
 ---
 

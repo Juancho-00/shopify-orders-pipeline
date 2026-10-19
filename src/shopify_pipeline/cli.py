@@ -17,6 +17,7 @@ QUÉ HACE
     shopify-pipeline extract --days 3 --filtrar-por actualizacion   # captura pagos confirmados tarde
     shopify-pipeline transform                      # rehace el reporte Siesa de la última extracción
     shopify-pipeline conciliar                      # fase 2: ¿los pedidos reportados ya están en Siesa?
+    shopify-pipeline plantillas                     # fase 3: plantilla de clientes para Siesa
 
 Logs (en --log-dir, por defecto data/logs):
     shopify_pipeline_AAAAMMDD.log   # bitácora de cada ejecución del día
@@ -48,6 +49,7 @@ import requests
 
 from shopify_pipeline import __version__
 from shopify_pipeline.config import ShopifyConfig, load_env_file
+from shopify_pipeline.erp.run import DEFAULT_CARGAS_DIR, generar_plantillas, ultimo_reporte
 from shopify_pipeline.exceptions import CONFIGURATION_ERRORS, ConfigError, DataError, ShopifyError
 from shopify_pipeline.extract import DEFAULT_OUTPUT_DIR, run_extraction
 from shopify_pipeline.logs import setup_logging
@@ -225,6 +227,23 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument(
         "--strict", action="store_true", help="Código 3 si algún pedido reportado no está en Siesa."
     )
+
+    pl = sub.add_parser(
+        "plantillas", help="Fase 3: genera la plantilla de clientes (Terceros) para cargar a Siesa."
+    )
+    pl.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Reporte pedidos_siesa_<run_id>.csv (default: el más reciente de --processed-dir).",
+    )
+    pl.add_argument("--processed-dir", type=Path, default=DEFAULT_PROCESSED_DIR)
+    pl.add_argument("--output-dir", type=Path, default=DEFAULT_CARGAS_DIR)
+    pl.add_argument(
+        "--strict",
+        action="store_true",
+        help="Código 4 si algún pedido no se puede cargar por datos faltantes.",
+    )
     return parser
 
 
@@ -363,6 +382,16 @@ def _cmd_conciliar(args: argparse.Namespace) -> int:
     return EXIT_UNRECONCILED if args.strict and resultado.faltantes else EXIT_OK
 
 
+def _cmd_plantillas(args: argparse.Namespace) -> int:
+    reporte = args.input or ultimo_reporte(args.processed_dir)
+    if not reporte.exists():
+        raise ConfigError(f"No existe el archivo {reporte}.")
+    if reporte.stem.endswith("_revision"):
+        raise ConfigError(f"{reporte.name} es un reporte de revisión: no se carga a Siesa.")
+    run = generar_plantillas(reporte, args.output_dir, args.log_dir)
+    return EXIT_DATA if args.strict and run.no_cargados else EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     # Paso 1: cargar el .env ANTES de leer los argumentos, porque el valor por defecto de
     # --codigo-envio sale de la variable SIESA_CODIGO_ENVIO definida en el .env.
@@ -383,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_transform(args)
         if args.command == "conciliar":
             return _cmd_conciliar(args)
+        if args.command == "plantillas":
+            return _cmd_plantillas(args)
     except CONFIGURATION_ERRORS as exc:
         logger.error("Error de configuración/credenciales: %s", exc)
         return EXIT_CONFIG

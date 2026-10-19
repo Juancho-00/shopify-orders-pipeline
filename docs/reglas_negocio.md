@@ -1,17 +1,15 @@
-# Reglas de negocio · cuestionario para definir
+# Reglas de negocio
 
-Lista de las decisiones de negocio que necesita el pipeline para terminar la fase 1 y construir
-las fases 2 y 3. Está pensada para resolverse en una reunión con el área comercial o de
-e-commerce, contabilidad y el equipo de Siesa.
+Decisiones de negocio que gobiernan el pipeline en sus tres fases. Cada regla trae lo que se
+decidió y dónde está aplicada en el código. Las que siguen abiertas indican qué falta.
 
-**Cómo usarla:** cada regla trae la pregunta, por qué importa, las opciones y una recomendación.
-Basta con marcar la opción elegida y anotar quién la aprobó. Cada respuesta se aplica en un
-solo lugar del código.
+Las respuestas de R-06 a R-36 las entregó TI el **2026-10-19**.
 
-| Estado       | Significado                |
-| ------------ | -------------------------- |
-| ✅ Definida  | Ya decidida e implementada |
-| ⏳ Pendiente | Hay que decidirla          |
+| Estado | Significado |
+|---|---|
+| ✅ Definida | Ya decidida e implementada |
+| 🟡 Decidida, sin implementar | Decidida; se aplica cuando se construya la parte que la usa |
+| ⏳ Pendiente | Hay que decidirla |
 
 **Responsables:** **Negocio** = comercial / e-commerce · **Contab.** = contabilidad ·
 **Siesa** = equipo de Siesa · **Shopify** = equipo de implementación de Shopify (José).
@@ -20,281 +18,196 @@ solo lugar del código.
 
 ## Resumen
 
-| ID   | Regla                                                                        | Fase | Responsable       | Estado       |
-| ---- | ---------------------------------------------------------------------------- | ---- | ----------------- | ------------ |
-| R-01 | Solo pedidos con pago confirmado                                             | 1    | Negocio           | ✅           |
-| R-02 | Excluir pedidos cancelados y de prueba                                       | 1    | Negocio           | ✅           |
-| R-03 | Precios con IVA incluido, sin transformación                                | 1    | Contab.           | ✅           |
-| R-04 | Alertas en un log aparte                                                     | 1    | —                | ✅           |
-| R-05 | Cédula/NIT en el campo `company`                                          | 1    | Shopify           | ✅           |
-| R-06 | Cómo identificar si el documento es CC o NIT                                | 1    | Negocio + Shopify | ⏳           |
-| R-07 | ¿El envío lleva IVA?                                                       | 1    | Contab.           | ⏳           |
-| R-08 | Código Siesa del ítem de envío                                            | 1    | Siesa             | ⏳           |
-| R-09 | Equivalencia de bodegas Shopify → Siesa                                     | 1    | Siesa             | ⏳           |
-| R-10 | Códigos de tipo de documento en Siesa                                       | 1    | Siesa             | ⏳           |
-| R-11 | Ciudad: texto o código DANE                                                 | 1    | Siesa             | ⏳           |
-| R-12 | Formato del documento de referencia                                          | 1    | Siesa             | ⏳           |
-| R-13 | Pedidos con descuento: cómo se registran                                    | 1    | Contab.           | ⏳           |
-| R-20 | Cómo se consultan los pedidos en Siesa                                      | 2    | Siesa             | ⏳           |
-| R-21 | Llave de cruce Shopify ↔ Siesa                                              | 2    | Siesa             | ⏳           |
-| R-22 | Qué se compara además de la existencia                                     | 2    | Negocio + Contab. | ⏳           |
-| R-23 | Tolerancia en diferencias de valor                                           | 2    | Contab.           | ⏳           |
-| R-24 | Qué hacer con cada resultado de la conciliación                            | 2    | Negocio           | ⏳           |
-| R-30 | Cómo se cargan los datos a Siesa                                            | 3    | Siesa             | ⏳           |
-| R-31 | Cómo saber si un cliente ya existe                                          | 3    | Siesa             | ⏳           |
-| R-32 | Datos fijos del cliente (régimen, clase, sucursal)                          | 3    | Contab. + Siesa   | ⏳           |
-| R-33 | Datos fijos del pedido (centro de operación, vendedor, lista de precios...) | 3    | Siesa             | ⏳           |
-| R-34 | Qué hacer si falta un dato obligatorio                                      | 3    | Negocio           | ⏳           |
-| R-35 | Evitar pedidos duplicados en Siesa                                           | 3    | Siesa             | ⏳ (parcial) |
-| R-36 | Pedidos que cambian después de cargados (reembolso, cancelación)           | 3    | Negocio + Contab. | ⏳           |
+| ID | Regla | Fase | Estado |
+|---|---|---|---|
+| R-01 | Solo pedidos con pago confirmado | 1 | ✅ |
+| R-02 | Excluir pedidos cancelados y de prueba | 1 | ✅ |
+| R-03 | Precios con IVA incluido, sin transformación | 1 | ✅ |
+| R-04 | Alertas en un log aparte | 1 | ✅ |
+| R-05 | Cédula/NIT en el campo `company` | 1 | ✅ |
+| R-06 | CC o NIT según el formato del número | 1 | ✅ |
+| R-07 | El envío lleva IVA, ya incluido en el valor | 1 | ✅ |
+| R-08 | Ítem de envío `SERV01` | 1 | ✅ |
+| R-09 | Tabla de bodegas Shopify → Siesa | 1 | ✅ |
+| R-10 | Tipo de documento: `C` = cédula, `N` = NIT | 1 | ✅ (falta CE y pasaporte) |
+| R-11 | Ciudad como código Siesa (`169` + DANE) | 1 | ✅ |
+| R-12 | Referencia = número del pedido sin `#` | 1 | ✅ |
+| R-13 | Siesa no recibe descuentos: precio neto | 1 | ✅ |
+| R-20 | Siesa se consulta con un exporte Excel en una carpeta | 2 | ✅ |
+| R-21 | Llave de cruce: `_num_docto_referencia` | 2 | ✅ |
+| R-22 | Solo se verifica que el pedido exista | 2 | ✅ |
+| R-23 | Sin decimales: valores en pesos enteros | 1 y 2 | ✅ |
+| R-24 | Tolerancia máxima de $50 | 1 | ✅ |
+| R-30 | Dos plantillas Excel: primero clientes, luego pedidos | 3 | 🟡 |
+| R-31 | El cliente se sube siempre con cada pedido | 3 | 🟡 |
+| R-32 | Datos fijos del cliente | 3 | ⏳ (se valida al llenar la plantilla) |
+| R-33 | Datos fijos del pedido = los de la plantilla | 3 | 🟡 |
+| R-34 | Si falta un dato obligatorio, el pedido no se sube | 3 | 🟡 |
+| R-35 | Siesa impide referencias duplicadas | 3 | ✅ |
+| R-36 | Cambios después de cargado: log y gestión manual | 3 | ✅ |
 
 ---
 
-## Fase 1 · Extracción (pendientes)
+## Fase 1 · Extracción
 
-### R-06 · Cómo identificar si el documento es CC o NIT ⏳
+### R-06 · Cómo identificar si el documento es CC o NIT ✅
 
-**Contexto:** Shopify solo captura el número en `company`. Hoy el tipo se deduce por formato:
-prefijo `NIT`, guion con dígito de verificación, o 9 dígitos que empiezan por 8 o 9.
-Los casos deducidos solo por formato quedan como `NIT_POR_VERIFICAR`.
+Si el cliente escribe el tipo (`CC`, `NIT`...) o el DV con guion, se respeta. Si solo escribe
+el número:
 
-**Opciones:**
+| Número | Tipo |
+|---|---|
+| 9 dígitos que empiezan por `900`, `901` u `800` (≈95 % de los NIT) | NIT |
+| 9 dígitos que empiezan por otro 8 o 9 | NIT, con alerta `NIT_POR_VERIFICAR` |
+| 7 u 8 dígitos (cédulas antiguas) | CC |
+| 10 dígitos (cédulas nuevas: `1000…`, `1100…`, `1152469156`...) | CC |
+| 10 dígitos = NIT de `800`/`900`/`901` + su DV pegado (`9001234567`) | NIT |
+| Otro formato | Sin tipo, alerta `TIPO_DOCUMENTO_NO_IDENTIFICADO` |
 
-- **A.** Agregar en el checkout de Shopify un campo "Tipo de documento" (lista: CC, NIT, CE, Pasaporte).
-- **B.** Pedir que el NIT se escriba siempre con guion y dígito de verificación (`900123456-7`) y tratar todo lo demás como CC.
-- **C.** Mantener la deducción por formato y revisar a mano los `NIT_POR_VERIFICAR`.
+**Aclarado el 2026-10-19:** toda cédula nueva de 10 dígitos es CC, no solo las que empiezan
+por 1000 o 1100. La única excepción es un NIT escrito con el DV sin guion: se reconoce
+porque el último dígito coincide con el DV calculado.
+**Código:** `tipo_por_formato` en `transform/normalize.py`.
 
-**Recomendación:** A. Elimina la ambigüedad desde el origen. B sirve como solución temporal mientras Shopify hace el cambio.
+### R-07 · El envío lleva IVA ✅
 
-**Decisión:** ______ **Aprobó:** ______ **Fecha:** ______
+En Siesa el envío lleva IVA. El valor que cobra la web ya lo incluye: no se transforma. Como
+Shopify no desglosa ese IVA, el reporte marca la línea de envío con `tasa_iva = 0.19`.
 
-### R-07 · ¿El envío lleva IVA? ⏳
+### R-08 · Código Siesa del ítem de envío ✅
 
-**Contexto:** en el pedido #1006, Shopify cobró $12.294,34 de envío sin calcularle IVA. El IVA
-del pedido ($14.369,59) corresponde solo al producto.
+`SERV01`. Es el valor por defecto de `SIESA_CODIGO_ENVIO`. El envío sale de la misma bodega
+que los productos del pedido, como en la plantilla del conector VTEX.
 
-**Opciones:**
+### R-09 · Equivalencia de bodegas Shopify → Siesa ✅
 
-- **A.** El envío no lleva IVA: Siesa lo registra con tarifa 0 %.
-- **B.** El envío lleva IVA del 19 % incluido en el valor: hay que activar en Shopify el cobro de impuestos sobre las tarifas de envío.
+La tabla entregada (23 ubicaciones) está en `src/shopify_pipeline/catalogos/bodegas_siesa.csv`.
+Una ubicación nueva en Shopify sin fila en la tabla genera la alerta `BODEGA_SIN_EQUIVALENCIA`.
+Para agregarla basta con añadir la fila al CSV.
 
-**Por qué importa:** si Siesa le calcula IVA al envío y Shopify no, el impuesto del pedido no cuadra entre los dos sistemas.
+### R-10 · Códigos de tipo de documento en Siesa ✅
 
-**Decisión:** ______
+| Tipo | Código en Siesa |
+|---|---|
+| Cédula de ciudadanía (CC) | `C` |
+| NIT | `N` |
+| Cédula de extranjería (CE) | ⏳ pendiente (alerta `TIPO_DOCUMENTO_SIN_CODIGO_SIESA`) |
+| Pasaporte (PP) | ⏳ pendiente (ídem) |
 
-### R-08 · Código Siesa del ítem de envío ⏳
+### R-11 · Ciudad como código ✅
 
-**Contexto:** el envío se reporta como una línea más, con la referencia `ENVIO`.
-**Pregunta:** ¿qué código de ítem (servicio) existe o se debe crear en Siesa para el flete?
-**Dónde se configura:** `SIESA_CODIGO_ENVIO` en el `.env`.
+El pipeline convierte el texto de la ciudad al código de la tabla de ciudades de Siesa
+(`catalogos/ciudades_siesa.csv`): `169` (Colombia) + departamento DANE + municipio DANE.
+Ejemplo: Medellín = `16905001`. Busca la ciudad dentro del departamento del pedido, sin
+importar tildes ni mayúsculas. Lo que no reconoce va al log como `CIUDAD_SIN_CODIGO`.
 
-**Código:** ______
+### R-12 · Formato del documento de referencia ✅
 
-### R-09 · Equivalencia de bodegas Shopify → Siesa ⏳
+El número del pedido de Shopify sin caracteres especiales (`#1006` → `1006`), de cualquier
+longitud. Columna `documento_referencia` del reporte.
 
-**Contexto:** Shopify asigna cada producto a una *ubicación* (p. ej. "Bodega Principal Medellín").
-Siesa necesita su propio código de bodega.
+### R-13 · Pedidos con descuento ✅
 
-| Ubicación en Shopify | ID Shopify | Código bodega Siesa |
-| --------------------- | ---------- | -------------------- |
-|                       |            |                      |
-|                       |            |                      |
+Siesa no recibe descuentos. El reporte trae dos precios por línea:
 
-**Pregunta adicional:** si Shopify no asigna bodega a un producto (`SIN_BODEGA`), ¿se usa una bodega por defecto? ¿Cuál?
+- `precio_unitario`: precio del ítem en Shopify.
+- `precio_neto`: precio con el descuento aplicado, (precio × cantidad − descuento) ÷
+  cantidad. **Es el que se sube a Siesa.**
 
-### R-10 · Códigos de tipo de documento en Siesa ⏳
-
-| Tipo                         | Código en Siesa |
-| ---------------------------- | ---------------- |
-| Cédula de ciudadanía (CC)  |                  |
-| NIT                          |                  |
-| Cédula de extranjería (CE) |                  |
-| Pasaporte (PP)               |                  |
-
-### R-11 · Ciudad: texto o código DANE ⏳
-
-**Contexto:** Shopify entrega la ciudad como texto escrito por el cliente ("Medellin", "Medellín",
-"MEDELLIN"). Siesa normalmente trabaja con el código DANE (Medellín = `05001`).
-
-**Opciones:**
-
-- **A.** Siesa recibe el texto y lo homologa.
-- **B.** El pipeline convierte el texto a código DANE con una tabla de equivalencias; los casos que no reconozca van al log de alertas.
-
-**Recomendación:** B, con la tabla oficial de municipios del DANE.
-
-### R-12 · Formato del documento de referencia ⏳
-
-**Contexto:** es el número que une el pedido de Siesa con el de Shopify (hoy `1006`).
-
-**Opciones:** `1006` · `#1006` · `SHOP-1006` · otro: ______
-**Pregunta adicional:** ¿qué campo de Siesa lo guarda y qué longitud máxima acepta?
-
-### R-13 · Pedidos con descuento ⏳
-
-**Contexto:** hoy cada línea trae `precio_unitario` (precio de lista) y `descuento_linea` (valor total descontado).
-
-**Opciones:**
-
-- **A.** Siesa recibe el precio de lista y el descuento por separado.
-- **B.** Siesa recibe el precio neto (precio − descuento ÷ cantidad) sin descuento aparte.
-
-**Por qué importa:** cambia cómo se ven los descuentos en los informes de ventas de Siesa.
+`descuento_linea` queda como información. Todos en pesos enteros (R-23).
 
 ---
 
 ## Fase 2 · Conciliación (Shopify ↔ Siesa)
 
-**Objetivo:** confirmar que cada pedido con pago confirmado en Shopify exista en Siesa, y
-detectar los que faltan o tienen diferencias.
+**Objetivo:** confirmar que cada pedido reportado exista en Siesa.
+**Comando:** `shopify-pipeline conciliar` (ver README).
 
-### R-20 · Cómo se consultan los pedidos en Siesa ⏳
+### R-20 · Cómo se consultan los pedidos en Siesa ✅
 
-**Opciones (de más a menos automatizable):**
+Opción **C**: alguien exporta el reporte de pedidos de Siesa a Excel y lo deja en
+`data/siesa/exportes/`. El pipeline toma el más reciente.
+Formato confirmado con el exporte real (2026-10-19): columnas `Nro documento` (tipo de
+documento + consecutivo de Siesa, p. ej. `CPM-00003210`) y `_num_docto_referencia`.
 
-- **A.** API o web service de Siesa.
-- **B.** Consulta de solo lectura a la base de datos de Siesa (vista o usuario de consulta).
-- **C.** Reporte exportado de Siesa (Excel o CSV) que alguien descarga y deja en una carpeta.
+### R-21 · Llave de cruce ✅
 
-**Recomendación:** empezar con **C**, porque no requiere permisos técnicos y se puede construir ya
-con un archivo de ejemplo, y migrar a A o B después.
-**Se necesita:** un archivo de ejemplo del reporte (con datos de prueba) y saber cómo se genera.
+`_num_docto_referencia` de Siesa contra `documento_referencia` del reporte.
 
-### R-21 · Llave de cruce ⏳
+### R-22 · Qué se compara ✅
 
-**Pregunta:** ¿en qué campo de Siesa queda el número de pedido de Shopify (`documento_referencia`)?
-Depende de R-12.
+Solo que el número del pedido exista en Siesa. Resultado por pedido: `EN_SIESA` o
+`FALTA_EN_SIESA`, en `data/reconciliation/conciliacion_<fecha>.xlsx`.
 
-### R-22 · Qué se compara además de la existencia ⏳
+### R-23 · Valores sin decimales ✅
 
-Marcar lo que se debe verificar:
+Ni Shopify ni Siesa deben manejar decimales en los valores: el reporte envía pesos enteros.
+Shopify a veces entrega centavos (el envío del #1006 fue $12.294,34): se redondean al peso
+más cercano (confirmado el 2026-10-19).
 
-- [ ] Existe el pedido en Siesa
-- [ ] Valor total
-- [ ] Cantidad de líneas o productos
-- [ ] Cantidades por referencia
-- [ ] Cliente (número de documento)
-- [ ] Estado (anulado en Siesa vs. vigente en Shopify)
+### R-24 · Tolerancia ✅
 
-### R-23 · Tolerancia en diferencias de valor ⏳
+Diferencia máxima de **$50** entre la suma de las líneas y el total del pedido en Shopify.
+Absorbe el redondeo a pesos enteros; una diferencia mayor genera `TOTAL_NO_CUADRA`.
 
-**Contexto:** puede haber diferencias por redondeo del IVA entre los dos sistemas.
-**Pregunta:** ¿qué diferencia en el total se acepta como "cuadrado"? Ejemplo: hasta $100 o hasta 0,1 %.
-
-**Tolerancia:** ______
-
-### R-24 · Qué hacer con cada resultado ⏳
-
-| Resultado                        | Acción propuesta                                | ¿De acuerdo? |
-| -------------------------------- | ------------------------------------------------ | ------------- |
-| En ambos y cuadra                | Nada                                             |               |
-| Solo en Shopify (falta en Siesa) | Pasa a la fase 3 para crearlo                    |               |
-| Solo en Siesa                    | Alerta: pedido manual o referencia mal escrita   |               |
-| En ambos con diferencias         | Alerta para revisión manual; no se corrige solo |               |
-
-**Pregunta adicional:** ¿quién revisa el informe de conciliación y con qué frecuencia?
+**Revisión:** la conciliación es manual y diaria. Una persona exporta el Excel de Siesa y ejecuta `conciliar`; por ahora lo hace TI y después el asistente o un digitador. A futuro se evaluará un agente de IA para la exportación (ver `ejecucion_programada.md`).
 
 ---
 
 ## Fase 3 · Creación de clientes y pedidos en Siesa
 
-**Objetivo:** crear en Siesa los clientes nuevos y los pedidos que la fase 2 marque como faltantes.
+**Objetivo:** generar las plantillas para crear en Siesa los clientes y pedidos reportados.
+La estructura de cada columna está en [plantillas_siesa.md](plantillas_siesa.md).
 
-> **Nota:** Siesa está desarrollando la integración oficial con Shopify. Conviene confirmar con
-> Siesa qué cubrirá su integración y hasta cuándo se usará esta contingencia, para no construir
-> algo que se reemplace pronto.
+> **Nota:** Siesa está desarrollando la integración oficial con Shopify. Conviene confirmar
+> qué cubrirá y hasta cuándo se usará esta contingencia.
 
-### R-30 · Cómo se cargan los datos a Siesa ⏳
+### R-30 · Cómo se cargan los datos a Siesa 🟡
 
-**Opciones:**
+Dos plantillas Excel, en este orden:
 
-- **A.** Archivo plano de importación con la plantilla de Siesa, que alguien carga manualmente.
-- **B.** Conector o web service de Siesa (carga automática).
+1. Clientes (`Terceros`, `Clientes`, `Imptos y Reten`, `Ent. Dinamica Cliente`).
+2. Pedidos (`Pedidos`, `Movto Pedidos comercial`).
 
-**Se necesita:** las plantillas de **cliente** y **pedido** y, por cada columna:
+### R-31 · Clientes existentes 🟡
 
-| Dato                 | Ejemplo                                   |
-| -------------------- | ----------------------------------------- |
-| Nombre de la columna | `NIT_CLIENTE`                           |
-| Tipo y longitud      | texto 15 · número · fecha `AAAAMMDD` |
-| ¿Obligatoria?       | sí / no                                  |
-| De dónde sale       | campo de Shopify o valor fijo             |
-| Valores permitidos   | catálogo, si aplica                      |
-
-### R-31 · Cómo saber si un cliente ya existe ⏳
-
-**Opciones:**
-
-- **A.** Por número de documento (recomendado).
-- **B.** Por documento + email.
-
-**Pregunta adicional:** si el cliente ya existe con otra dirección o teléfono, ¿se actualiza en Siesa o se deja como está?
+El cliente se sube **siempre** con cada pedido, aunque ya exista, porque sus datos
+(dirección, teléfono) pueden haber cambiado.
 
 ### R-32 · Datos fijos del cliente ⏳
 
-Valores que Shopify no tiene y que Siesa exige al crear un tercero:
+Se valida cuando se llene la plantilla. Las preguntas abiertas (NIT/razón social, condición
+de pago de contraentrega, fecha de nacimiento, CE/pasaporte) están en
+[plantillas_siesa.md](plantillas_siesa.md#preguntas-abiertas-resolver-con-r-32).
 
-| Dato                                                | Valor para clientes de e-commerce |
-| --------------------------------------------------- | --------------------------------- |
-| Clase de tercero / tipo de cliente                  |                                   |
-| Régimen o responsabilidad fiscal (persona natural) |                                   |
-| Régimen o responsabilidad fiscal (empresa con NIT) |                                   |
-| Sucursal                                            |                                   |
-| Condición de pago                                  |                                   |
-| Vendedor o asesor asignado                          |                                   |
-| Otros campos obligatorios de la plantilla           |                                   |
+### R-33 · Datos fijos del pedido 🟡
 
-### R-33 · Datos fijos del pedido ⏳
+Los valores fijos son los que trae la plantilla: centro de operación `001`, tipo de documento
+`CPM`, condición de pago `03D`, lista de precios `03`, unidad `UND`, motivo `06`, etc.
 
-| Dato                                                  | Valor |
-| ----------------------------------------------------- | ----- |
-| Centro de operación                                  |       |
-| Tipo de documento del pedido                          |       |
-| Vendedor                                              |       |
-| Lista de precios                                      |       |
-| Condición de pago (pagado en línea / contraentrega) |       |
-| Fecha de entrega (¿= fecha de compra + N días?)     |       |
-| Unidad de medida                                      |       |
-| Otros campos obligatorios de la plantilla             |       |
+### R-34 · Falta un dato obligatorio 🟡
 
-### R-34 · Qué hacer si falta un dato obligatorio ⏳
+El pedido **no se sube**. Queda en el log para corregirlo a mano.
 
-**Ejemplo:** pedido sin cédula, producto sin SKU o bodega sin equivalencia.
+### R-35 · Evitar pedidos duplicados ✅
 
-**Opciones:**
+- **Pipeline:** el registro `data/state/reportados.json` evita que un pedido salga en dos
+  reportes (`YA_REPORTADO`).
+- **Siesa:** el permiso del usuario impide crear dos pedidos con el mismo
+  `_num_docto_referencia`.
+- **Conciliación:** si el exporte trae una referencia repetida, se avisa en la bitácora.
 
-- **A.** No se carga ese pedido; queda en el log para corregirlo a mano (recomendado).
-- **B.** Se carga con un valor por defecto (p. ej. cliente genérico "consumidor final").
+### R-36 · Pedidos que cambian después de cargados ✅
 
-### R-35 · Evitar pedidos duplicados ⏳
-
-**Ya resuelto en el pipeline:** el registro de pedidos reportados (`data/state/reportados.json`)
-evita que un pedido salga en dos reportes (`YA_REPORTADO`).
-**Falta:** confirmar contra Siesa antes de cargar (fase 2), por si un pedido se creó a mano o
-se cargó desde otro reporte.
-**Pregunta:** ¿Siesa rechaza por sí mismo un documento de referencia repetido?
-
-### R-36 · Pedidos que cambian después de cargados ⏳
-
-| Caso en Shopify                           | ¿Qué debe pasar en Siesa? |
-| ----------------------------------------- | --------------------------- |
-| Se cancela un pedido ya cargado           |                             |
-| Reembolso parcial (devuelven un producto) |                             |
-| Reembolso total                           |                             |
-| Se edita el pedido (cambian cantidades)   |                             |
-
-**Hoy:** si el total de un pedido ya reportado cambia, queda en el log como
-`CAMBIO_POST_REPORTE` y no se vuelve a reportar.
-**Recomendación:** mantener ese aviso y que la corrección en Siesa la haga una persona, al
-menos al inicio. Falta definir quién la hace y cómo (nota crédito, anulación, ajuste).
+Los cambios no deseados (cancelación, reembolso, edición de un pedido ya reportado) quedan en
+el log como `CAMBIO_POST_REPORTE`. Si el pedido ya se cargó en Siesa, la persona responsable
+gestiona con logística que no se despache.
 
 ---
 
 ## Registro de decisiones
 
-Cuando se tome una decisión, anótala aquí y en `docs/decisiones.md`.
-
-| Fecha      | ID          | Decisión                                                                                                                     | Aprobó |
-| ---------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 2026-10-14 | R-01 a R-05 | R-01 → decisión 008 · R-02 → acordado el 14-oct · R-03 → 009 · R-04 → 007 · R-05 → 005 (ver `docs/decisiones.md`) |         |
-|            |             |                                                                                                                               |         |
+| Fecha | ID | Decisión |
+|---|---|---|
+| 2026-10-14 | R-01 a R-05 | R-01 → decisión 008 · R-02 → acordado el 14-oct · R-03 → 009 · R-04 → 007 · R-05 → 005 (ver `docs/decisiones.md`) |
+| 2026-10-19 | R-06 a R-36 | Respuestas de TI; aplicadas en decisiones 020 a 023 de `docs/decisiones.md` |

@@ -1,12 +1,10 @@
 """
-Fase 3 (pendiente): creación de clientes y pedidos en el ERP.
+Fase 3 (en construcción): plantillas Excel para crear clientes y pedidos en Siesa.
 
-Alcance previsto:
-    * Tomar los pedidos "solo en Shopify" que entrega la fase 2.
-    * Mapear cliente y pedido a las plantillas del ERP (``templates/erp/``),
-      con validación de tipos y longitudes por columna.
-    * Generar los archivos de carga (o llamar la API del ERP) de forma idempotente.
+    terceros.py   hoja ``Terceros`` de la plantilla de clientes (una fila por cliente)
+    clientes.py   hojas ``Clientes``, ``Imptos y Reten`` y ``Ent. Dinamica Cliente``
+    run.py        lee el reporte de la fase 1 y escribe el Excel (comando ``plantillas``)
 
-Información necesaria para implementarla: las plantillas de cliente y pedido y,
-por cada columna, tipo de dato, longitud, obligatoriedad y origen en Shopify.
+Pendiente: la plantilla de pedidos. Estructura de cada columna en
+``docs/plantillas_siesa.md``.
 """

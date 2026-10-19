@@ -29,6 +29,8 @@ DESCRIPCIONES: dict[str, str] = {
     "NIT_POR_VERIFICAR": "Clasificado como NIT por formato, pero no inicia en 800, 900 ni 901",
     "TIPO_DOCUMENTO_NO_IDENTIFICADO": "El formato no corresponde a una CC ni a un NIT (ver regla R-06)",
     "TIPO_DOCUMENTO_SIN_CODIGO_SIESA": "CE o pasaporte: Siesa aún no tiene código definido",
+    "DIRECCION_TRUNCADA": "La dirección no cabe en los 3 campos de 40 caracteres de Siesa",
+    "TERCERO_INCOMPLETO": "Faltan datos obligatorios del cliente: el pedido no se carga a Siesa (R-34)",
     "CIUDAD_SIN_CODIGO": "La ciudad no se encontró en la tabla de ciudades de Siesa",
     "SIN_NOMBRE": "Pedido sin nombre del cliente",
     "SIN_APELLIDO": "Pedido sin apellido del cliente",

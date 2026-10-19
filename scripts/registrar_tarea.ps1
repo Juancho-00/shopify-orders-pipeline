@@ -18,10 +18,10 @@
     Ruta completa al python.exe del entorno del pipeline (igual que en ejecutar_pipeline.ps1).
 
 .PARAMETER Hora
-    Hora diaria de ejecución, formato 24 h. Por defecto 06:00.
+    Hora diaria de ejecución, formato 24 h. Por defecto 06:30.
 
 .EXAMPLE
-    .\scripts\registrar_tarea.ps1 -Python "C:\Users\usuario\miniconda3\envs\shopify-pipeline\python.exe" -Hora "06:00"
+    .\scripts\registrar_tarea.ps1 -Python "C:\Users\usuario\miniconda3\envs\shopify-pipeline\python.exe" -Hora "06:30"
 #>
 [CmdletBinding()]
 param(
@@ -29,7 +29,7 @@ param(
     [string]$Python,
 
     [ValidatePattern("^\d{2}:\d{2}$")]
-    [string]$Hora = "06:00",
+    [string]$Hora = "06:30",
 
     [string]$NombreTarea = "Shopify Pipeline - Extraccion diaria",
 

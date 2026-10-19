@@ -83,7 +83,8 @@ src/shopify_pipeline/
 ├── reconciliation/      Fase 2: ¿los pedidos reportados están en Siesa?
 │   ├── siesa_export.py  Lee el exporte de Siesa y saca los números de pedido
 │   └── run.py           Cruza y escribe el reporte de conciliación
-└── erp/                 Fase 3 (vacía por ahora; ver docs/plantillas_siesa.md)
+└── erp/                 Fase 3: plantillas de Siesa (en construcción)
+    └── terceros.py      Pedido del reporte → fila de la hoja Terceros
 ```
 
 **Regla para orientarse:** los archivos de `shopify/` saben de Shopify pero no de Siesa. Los
@@ -375,8 +376,22 @@ con los faltantes primero.
 
 ### `erp/`
 
-Carpeta reservada para la fase 3 (generar las plantillas de Siesa). La estructura de las
-plantillas está en `docs/plantillas_siesa.md`.
+Fase 3: generar las plantillas de Siesa. La estructura de las plantillas está en
+`docs/plantillas_siesa.md`.
+
+- `erp/terceros.py` → `fila_tercero`: toma una fila del reporte y arma la fila de la hoja
+  `Terceros` (nombres en mayúsculas, razón social si es NIT, teléfono sin `57`, país `169`
+  y ciudad partida en depto/ciudad, fecha de carga como fecha de nacimiento). `repartir_direccion` acomoda la dirección en los 3
+  campos de 40 caracteres sin partir palabras. Si falta un dato obligatorio, el tercero
+  sale como no cargable con la lista de lo que falta.
+- `erp/clientes.py` → hojas `Clientes` (`fila_cliente`: valores fijos `001`, `W001`, `03D`,
+  `C001`, `1`, `500` y los datos del tercero), `Imptos y Reten` (`filas_impuestos`: 3 filas
+  por cliente, agrupadas por clase de impuesto) y `Ent. Dinamica Cliente` (`fila_entidad`:
+  el correo).
+- `erp/run.py` → `generar_plantillas`: lee el reporte de la fase 1, deja una fila por
+  cliente (la del pedido más reciente), escribe `terceros_<run_id>.xlsx` con las 4 hojas y el log
+  `plantillas_<run_id>.csv`. `pedidos_cargables` dirá qué pedidos pueden ir en la
+  plantilla de pedidos.
 
 ---
 
@@ -419,6 +434,9 @@ puede probar un 429, un 500 o un token vencido sin depender de la tienda real.
 | `test_fulfillment.py`   | La bodega por línea y qué pasa si falta el permiso                                                                 |
 | `test_extract.py`       | El JSONL y el manifiesto de una corrida, el aviso cuando el conteo no cuadra y que no se sobrescriba una extracción |
 | `test_state.py`         | Watermark, ventana incremental y registro de pedidos reportados                                                      |
+| `test_erp_terceros.py` | Fase 3, hoja Terceros: cédula vs. NIT, datos obligatorios y reparto de la dirección en 3 campos de 40 |
+| `test_erp_clientes.py` | Fase 3: valores fijos de `Clientes`, dirección en 2 campos, orden por bloques de `Imptos y Reten` y el correo en `Ent. Dinamica Cliente` |
+| `test_erp_run.py` | Fase 3: el Excel de terceros (una fila por cliente, números y textos), el log de pedidos no cargables y el comando `plantillas` |
 | `test_catalogos.py`     | Bodegas y ciudades de Siesa: tildes, apóstrofos, nombres repetidos y casos que no se adivinan                      |
 | `test_reconciliation.py` | Fase 2 con exportes sintéticos: filas de título, CSV con `;`, referencias `1006.0`, faltantes y `--strict`       |
 | `test_normalize.py`     | Cada función de limpieza con muchos casos (cédulas, NIT, teléfonos, apellidos)                                    |
