@@ -45,6 +45,10 @@ class ShopifyClientError(ShopifyError):
     """Otros 4xx no recuperables (400, 402, 406, 422, 423...)."""
 
 
+class ShopifyCostoExcedidoError(ShopifyClientError):
+    """GraphQL: la consulta supera el costo máximo por petición (1.000 puntos). Se achica la página."""
+
+
 class ShopifyRetryableError(ShopifyError):
     """429 / 5xx: error transitorio; se reintenta."""
 

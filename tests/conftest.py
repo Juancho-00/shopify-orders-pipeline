@@ -28,8 +28,17 @@ def _clean_env(monkeypatch):
         "SHOPIFY_CLIENT_ID",
         "SHOPIFY_CLIENT_SECRET",
         "SIESA_CODIGO_ENVIO",
+        "NOTIFICAR_A",
+        "SMTP_USUARIO",
+        "SMTP_CLAVE",
+        "SMTP_HOST",
+        "SMTP_PUERTO",
+        "NOTIFICAR_SOLO_FALLOS",
+        "SHOPIFY_API",
     ):
         monkeypatch.delenv(var, raising=False)
+    # Las pruebas existentes simulan la API REST (el respaldo); las de GraphQL lo cambian.
+    monkeypatch.setenv("SHOPIFY_API", "rest")
 
 
 @pytest.fixture
@@ -40,7 +49,7 @@ def sleeps() -> list[float]:
 
 @pytest.fixture
 def config() -> ShopifyConfig:
-    return ShopifyConfig(shop_domain=SHOP, access_token="shpat_test", max_attempts=4)
+    return ShopifyConfig(shop_domain=SHOP, access_token="shpat_test", max_attempts=4, api="rest")
 
 
 @pytest.fixture

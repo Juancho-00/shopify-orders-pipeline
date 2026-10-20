@@ -34,9 +34,10 @@ shopify-orders-pipeline/
 │   ├── exceptions.py        # Jerarquía de errores (auth, permisos, transitorios...)
 │   ├── shopify/
 │   │   ├── auth.py          # Token estático (legacy) o Client Credentials (Dev Dashboard)
-│   │   ├── client.py        # HTTP: reintentos, rate limiting, paginación por Link header
-│   │   ├── orders.py        # Filtros de pedidos y extracción
-│   │   └── fulfillment.py   # Bodega de salida de cada línea (fulfillment orders)
+│   │   ├── client.py        # HTTP: GraphQL y REST, reintentos, límite de llamadas/costo
+│   │   ├── graphql_orders.py # Pedidos + líneas + bodega en una sola consulta GraphQL (la que se usa)
+│   │   ├── orders.py        # Filtro de pedidos (ventana de fechas) y extracción REST (respaldo)
+│   │   └── fulfillment.py   # Bodega por pedido con REST (respaldo)
 │   ├── catalogos/           # Tablas de equivalencia Siesa (se editan a mano)
 │   │   ├── bodegas_siesa.csv  # Bodega Shopify → código Siesa y tipo de documento (CPW/CPT/CPM/NO_CARGA)
 │   │   └── ciudades_siesa.csv # Ciudades de Siesa: 169 + DANE
@@ -52,6 +53,7 @@ shopify-orders-pipeline/
 │   │   └── tabular.py       # CSV y Excel
 │   ├── extract.py           # Orquestación de la extracción + manifiesto de la corrida
 │   ├── state.py             # Estado entre corridas: watermark y pedidos ya reportados
+│   ├── notificaciones.py    # Aviso por correo del resultado de la corrida diaria (Gmail)
 │   ├── reconciliation/      # Fase 2: exporte de Siesa vs. reportes de la fase 1
 │   │   ├── siesa_export.py  # Lee el exporte (xlsx/csv) y saca _num_docto_referencia
 │   │   └── run.py           # Cruce y reporte de conciliación
@@ -367,8 +369,9 @@ La tarea (`Shopify Pipeline - Corrida diaria`) hace todo lo automático:
 2. `plantillas --strict` sobre el reporte de esa corrida: deja en `data\siesa\cargas\` la
    plantilla de clientes y la de pedidos.
 
-La persona encargada solo **valida y sube** las plantillas (primero clientes, luego pedidos)
-y después concilia. La tarea espera a que Google Drive monte la unidad, reintenta una vez
+Al terminar envía un **aviso por correo** (Gmail) con el resultado: si falló, qué hacer; si
+salió bien, cuántos pedidos quedaron listos y cuántos por revisar. La persona encargada solo
+**valida y sube** las plantillas (primero clientes, luego pedidos) y después concilia. La tarea espera a que Google Drive monte la unidad, reintenta una vez
 cada paso ante un error temporal y deja el historial en `data\logs\ejecuciones.csv`.
 Requisitos, revisión diaria y qué hacer con cada resultado en
 [`docs/ejecucion_programada.md`](docs/ejecucion_programada.md).
@@ -417,11 +420,15 @@ Requisitos, revisión diaria y qué hacer con cada resultado en
   `ERROR_TRANSFORMACION` y la corrida continúa. Un 404 al consultar la bodega de un pedido
   tampoco detiene la extracción.
 
-> **Nota sobre la API:** la REST Admin API es *legacy* desde octubre de 2024 (solo recibe
-> correcciones de seguridad). Funciona para apps propias como esta, pero la evolución
-> natural es migrar a la GraphQL Admin API. El cliente HTTP (`shopify/client.py`) y la
-> lógica de pedidos (`shopify/orders.py`) están separados para que la migración solo
-> toque esos dos módulos.
+> **API de Shopify: GraphQL (por defecto) con REST de respaldo.** La REST Admin API es
+> *legacy* desde octubre de 2024, así que el pipeline lee los pedidos con la GraphQL Admin
+> API (`shopify/graphql_orders.py`): pedido, líneas, envío y bodega llegan en una sola
+> consulta, sin la llamada extra por pedido que exigía REST. La respuesta se convierte al
+> mismo formato que entregaba REST, así que la transformación y las plantillas no cambian
+> y una prueba verifica que ambas APIs producen el mismo reporte.
+>
+> Si GraphQL fallara en la primera corrida real, basta con `SHOPIFY_API=rest` en el `.env`
+> para volver a REST sin tocar código. Con GraphQL, `--fields` y `--sin-bodega` no aplican.
 
 ---
 

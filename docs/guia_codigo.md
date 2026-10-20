@@ -37,9 +37,9 @@ Con el archivo crudo guardado, se puede rehacer el reporte las veces que haga fa
 | 5    | Arma la ventana de fechas (ayer → ahora)                        | `cli.py: build_filter` → `shopify/orders.py: OrderFilter`                        |
 | 6    | Arma la configuración y valida el dominio y las credenciales    | `config.py: ShopifyConfig.from_env`                                                 |
 | 7    | Crea el cliente que hablará con Shopify                         | `shopify/client.py: ShopifyClient`                                                  |
-| 8    | Pregunta cuántos pedidos hay (para comparar al final)           | `shopify/orders.py: count_orders`                                                   |
-| 9    | Descarga los pedidos, página por página                        | `shopify/orders.py: extract_orders` → `client.py: paginate`                      |
-| 10   | Por cada pedido, consulta la bodega de cada producto             | `shopify/fulfillment.py: BodegaEnricher`                                            |
+| 8    | Pregunta cuántos pedidos hay (para comparar al final)           | `shopify/graphql_orders.py: count_orders_graphql` (REST: `orders.py: count_orders`) |
+| 9    | Descarga los pedidos con su bodega, página por página           | `shopify/graphql_orders.py: extract_orders_graphql` → `client.py: graphql`        |
+| 10   | Convierte cada pedido al formato que usa la transformación       | `graphql_orders.py: a_formato_rest` (REST: `fulfillment.py: BodegaEnricher`)       |
 | 11   | Guarda todo en`data/raw/.../<run_id>.jsonl`                    | `sinks/jsonl.py: write_jsonl`                                                       |
 | 12   | Guarda el resumen de la corrida (`.manifest.json`)             | `extract.py: _write_manifest`                                                       |
 | 13   | Relee el JSONL y convierte cada pedido en filas                  | `transform/run.py: run_transform` → `transform/siesa_lines.py: transform_orders` |
@@ -64,6 +64,7 @@ src/shopify_pipeline/
 ├── exceptions.py        Los tipos de error con nombre propio
 ├── extract.py           Orquesta la extracción: contar → descargar → guardar → manifiesto
 ├── state.py             Memoria entre corridas: watermark y pedidos ya reportados
+├── notificaciones.py    Correo con el resultado de la corrida diaria (Gmail)
 ├── shopify/             TODO lo que habla con Shopify
 │   ├── auth.py          De dónde sale el token
 │   ├── client.py        Peticiones HTTP: errores, reintentos, límite, páginas
@@ -224,6 +225,23 @@ pase y, si igual pasa, espera y reintenta.
 > **Simplificado en esta revisión:** antes los reintentos usaban la librería `tenacity`,
 > difícil de leer. Ahora son un `for` normal en `_pedir_con_reintentos`, con el mismo
 > comportamiento.
+
+### `shopify/graphql_orders.py` — los pedidos con GraphQL (la API que se usa)
+
+**Para qué:** pedir a Shopify los pedidos de la ventana, con sus líneas, su envío y la
+bodega de cada producto, **en una sola consulta por página**. Con REST la bodega costaba una
+llamada extra por pedido.
+
+| Elemento | Qué hace |
+|---|---|
+| `ORDERS_QUERY` | La consulta GraphQL: qué campos se piden de cada pedido |
+| `search_query` | Traduce el filtro (`updated_at` entre dos fechas, estado) a la búsqueda de Shopify |
+| `count_orders_graphql` | Cuántos pedidos hay en la ventana (para comparar al final) |
+| `extract_orders_graphql` | Recorre las páginas con el cursor. Si la consulta "cuesta" demasiado, achica la página; si un pedido tiene muchas líneas, pide las que faltan |
+| `a_formato_rest` | Convierte cada pedido al mismo formato que entregaba REST (`order_number`, `line_items`...). Por eso el resto del pipeline no cambió |
+
+**El costo:** GraphQL no cuenta llamadas sino "puntos" según los campos pedidos; una
+consulta no puede pasar de 1.000. Por eso se piden 3 pedidos por página.
 
 ### `shopify/orders.py` — qué pedidos pedir
 
@@ -447,6 +465,7 @@ puede probar un 429, un 500 o un token vencido sin depender de la tienda real.
 | `test_erp_run.py` (pedidos) | Tipo de documento por bodega, consecutivo por bloques CPW → CPT → CPM, envío como línea más, y que un pedido no cargable no quede en ninguna plantilla |
 | `test_erp_run.py` | Fase 3: el Excel de terceros (una fila por cliente, números y textos), el log de pedidos no cargables y el comando `plantillas` |
 | `test_catalogos.py`     | Bodegas y ciudades de Siesa: tildes, apóstrofos, nombres repetidos y casos que no se adivinan                      |
+| `test_graphql.py`        | Que GraphQL y REST den **el mismo reporte** del pedido #1006, la conversión de campos, el cursor, el costo, THROTTLED y los permisos |
 | `test_reconciliation.py` | Fase 2 con exportes sintéticos: filas de título, CSV con `;`, referencias `1006.0`, faltantes y `--strict`       |
 | `test_normalize.py`     | Cada función de limpieza con muchos casos (cédulas, NIT, teléfonos, apellidos)                                    |
 | `test_siesa_lines.py`   | El pedido#1006 de punta a punta: filas, envío, cédula, exclusiones, alertas, aislamiento de errores y ledger    |

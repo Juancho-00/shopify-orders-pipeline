@@ -18,6 +18,7 @@ QUÉ HACE
     shopify-pipeline transform                      # rehace el reporte Siesa de la última extracción
     shopify-pipeline conciliar                      # fase 2: ¿los pedidos reportados ya están en Siesa?
     shopify-pipeline plantillas                     # fase 3: plantillas de clientes y pedidos para Siesa
+    shopify-pipeline notificar                      # correo con el resultado de la última corrida
 
 Logs (en --log-dir, por defecto data/logs):
     shopify_pipeline_AAAAMMDD.log   # bitácora de cada ejecución del día
@@ -53,6 +54,7 @@ from shopify_pipeline.erp.run import DEFAULT_CARGAS_DIR, generar_plantillas, ult
 from shopify_pipeline.exceptions import CONFIGURATION_ERRORS, ConfigError, DataError, ShopifyError
 from shopify_pipeline.extract import DEFAULT_OUTPUT_DIR, run_extraction
 from shopify_pipeline.logs import setup_logging
+from shopify_pipeline.notificaciones import notificar
 from shopify_pipeline.reconciliation.run import (
     DEFAULT_EXPORTES_DIR,
     DEFAULT_RECONCILIATION_DIR,
@@ -244,6 +246,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Código 4 si algún pedido no se puede cargar por datos faltantes.",
     )
+
+    no = sub.add_parser("notificar", help="Envía por correo el resultado de la última corrida (ver .env).")
+    no.add_argument(
+        "--run-id",
+        default="",
+        help="run_id de la corrida, para incluir el conteo de las plantillas (lo pasa el script diario).",
+    )
     return parser
 
 
@@ -382,6 +391,12 @@ def _cmd_conciliar(args: argparse.Namespace) -> int:
     return EXIT_UNRECONCILED if args.strict and resultado.faltantes else EXIT_OK
 
 
+def _cmd_notificar(args: argparse.Namespace) -> int:
+    # Siempre 0: un fallo del correo no debe marcar como fallida la corrida.
+    notificar(args.log_dir, args.run_id, args.log_dir.parent)
+    return EXIT_OK
+
+
 def _cmd_plantillas(args: argparse.Namespace) -> int:
     reporte = args.input or ultimo_reporte(args.processed_dir)
     if not reporte.exists():
@@ -414,6 +429,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_conciliar(args)
         if args.command == "plantillas":
             return _cmd_plantillas(args)
+        if args.command == "notificar":
+            return _cmd_notificar(args)
     except CONFIGURATION_ERRORS as exc:
         logger.error("Error de configuración/credenciales: %s", exc)
         return EXIT_CONFIG

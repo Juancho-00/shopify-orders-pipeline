@@ -150,7 +150,7 @@ más cercano (confirmado el 2026-10-19).
 Diferencia máxima de **$50** entre la suma de las líneas y el total del pedido en Shopify.
 Absorbe el redondeo a pesos enteros; una diferencia mayor genera `TOTAL_NO_CUADRA`.
 
-**Revisión:** la conciliación es manual y diaria. Una persona exporta el Excel de Siesa y ejecuta `conciliar`; por ahora lo hace TI y después el asistente o un digitador. A futuro se evaluará un agente de IA para la exportación (ver `ejecucion_programada.md`).
+**Revisión:** la conciliación es manual y diaria. Una persona exporta el Excel de Siesa y ejecuta `conciliar`; por ahora lo hace TI y después el asistente o un digitador. El exporte de Siesa es manual: Siesa solo se usa por escritorio remoto. Automatizarlo queda como mejora (ver *Mejoras para quien siga* en `ejecucion_programada.md`).
 
 ---
 

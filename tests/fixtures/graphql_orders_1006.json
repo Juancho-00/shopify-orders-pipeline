@@ -1,0 +1,173 @@
+{
+  "data": {
+    "orders": {
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "o1"
+      },
+      "nodes": [
+        {
+          "id": "gid://shopify/Order/18931603603821",
+          "legacyResourceId": "18931603603821",
+          "name": "#1006",
+          "createdAt": "2026-10-08T22:59:16Z",
+          "updatedAt": "2026-10-08T22:59:17Z",
+          "processedAt": "2026-10-08T22:59:15Z",
+          "cancelledAt": null,
+          "cancelReason": null,
+          "displayFinancialStatus": "PENDING",
+          "test": false,
+          "taxesIncluded": true,
+          "email": "cliente.prueba@example.com",
+          "phone": null,
+          "note": null,
+          "customAttributes": [],
+          "currentTotalPriceSet": {
+            "shopMoney": {
+              "amount": "102293.34"
+            }
+          },
+          "totalPriceSet": {
+            "shopMoney": {
+              "amount": "102293.34"
+            }
+          },
+          "billingAddress": {
+            "firstName": "Laura Sofía",
+            "lastName": "Restrepo de la Torre",
+            "company": "1.017.000.001",
+            "address1": "Calle 10 # 20-30",
+            "address2": null,
+            "city": "Medellin",
+            "province": "Antioquia",
+            "provinceCode": "ANT",
+            "zip": "050021",
+            "countryCodeV2": "CO",
+            "phone": "+573001112233"
+          },
+          "shippingAddress": {
+            "firstName": "Laura Sofía",
+            "lastName": "Restrepo de la Torre",
+            "company": "1.017.000.001",
+            "address1": "Calle 10 # 20-30",
+            "address2": null,
+            "city": "Medellin",
+            "province": "Antioquia",
+            "provinceCode": "ANT",
+            "zip": "050021",
+            "countryCodeV2": "CO",
+            "phone": "+573001112233"
+          },
+          "customer": {
+            "legacyResourceId": "31249571250541",
+            "firstName": "Laura Sofía",
+            "lastName": "Restrepo de la Torre",
+            "defaultAddress": {
+              "firstName": "Laura Sofía",
+              "lastName": "Restrepo de la Torre",
+              "company": "1.017.000.001",
+              "address1": "Calle 10 # 20-30",
+              "address2": null,
+              "city": "Medellin",
+              "province": "Antioquia",
+              "provinceCode": "ANT",
+              "zip": "050021",
+              "countryCodeV2": "CO",
+              "phone": "+573001112233"
+            }
+          },
+          "lineItems": {
+            "pageInfo": {
+              "hasNextPage": false,
+              "endCursor": "c1"
+            },
+            "nodes": [
+              {
+                "id": "gid://shopify/LineItem/50783188156781",
+                "sku": "KITK0108",
+                "name": "Dúo Revitalizante",
+                "title": "Dúo Revitalizante",
+                "quantity": 1,
+                "currentQuantity": 1,
+                "originalUnitPriceSet": {
+                  "shopMoney": {
+                    "amount": "89999.0"
+                  }
+                },
+                "totalDiscountSet": {
+                  "shopMoney": {
+                    "amount": "0.0"
+                  }
+                },
+                "discountAllocations": [],
+                "taxLines": [
+                  {
+                    "rate": 0.19
+                  }
+                ]
+              }
+            ]
+          },
+          "shippingLines": {
+            "nodes": [
+              {
+                "title": "Envío",
+                "code": "backup_rate",
+                "isRemoved": false,
+                "originalPriceSet": {
+                  "shopMoney": {
+                    "amount": "12294.34"
+                  }
+                },
+                "discountedPriceSet": {
+                  "shopMoney": {
+                    "amount": "12294.34"
+                  }
+                },
+                "taxLines": []
+              }
+            ]
+          },
+          "fulfillmentOrders": {
+            "nodes": [
+              {
+                "id": "gid://shopify/FulfillmentOrder/7001",
+                "status": "OPEN",
+                "assignedLocation": {
+                  "name": "D'Luchi PT Guarne",
+                  "location": {
+                    "legacyResourceId": "80001"
+                  }
+                },
+                "lineItems": {
+                  "pageInfo": {
+                    "hasNextPage": false
+                  },
+                  "nodes": [
+                    {
+                      "totalQuantity": 1,
+                      "lineItem": {
+                        "id": "gid://shopify/LineItem/50783188156781"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "extensions": {
+    "cost": {
+      "requestedQueryCost": 252,
+      "actualQueryCost": 40,
+      "throttleStatus": {
+        "maximumAvailable": 2000.0,
+        "currentlyAvailable": 1960.0,
+        "restoreRate": 100.0
+      }
+    }
+  }
+}

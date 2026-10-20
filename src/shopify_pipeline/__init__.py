@@ -10,4 +10,4 @@ Fases:
     3. Plantillas de clientes y pedidos para Siesa     (``erp``)
 """
 
-__version__ = "0.3.0"  # Las 3 fases construidas; falta la primera corrida con Shopify real.
+__version__ = "0.4.0"  # GraphQL + aviso por correo; falta la primera corrida con Shopify real.

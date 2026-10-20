@@ -25,6 +25,9 @@ def load_env_file(path: str | Path | None = None) -> None:
     load_dotenv(dotenv_path=path, override=False)
 
 
+APIS = frozenset({"graphql", "rest"})
+
+
 @dataclass(frozen=True)
 class ShopifyConfig:
     """Configuración de conexión a Shopify. Los secretos se excluyen de ``repr``."""
@@ -38,6 +41,8 @@ class ShopifyConfig:
     read_timeout: float = 60.0
     max_attempts: int = 6
     throttle_threshold: float = 0.8  # Fracción del bucket a partir de la cual se pausa.
+    # API para leer pedidos: "graphql" (recomendada) o "rest" (respaldo, legacy desde 2024-10).
+    api: str = "graphql"
 
     def __post_init__(self) -> None:
         domain = self.shop_domain.strip().lower()
@@ -55,6 +60,10 @@ class ShopifyConfig:
             )
         if not 0 < self.throttle_threshold <= 1:
             raise ConfigError("throttle_threshold debe estar en (0, 1].")
+        api = self.api.strip().lower()
+        if api not in APIS:
+            raise ConfigError(f"SHOPIFY_API inválida: {self.api!r}. Opciones: graphql, rest.")
+        object.__setattr__(self, "api", api)
 
     @property
     def timeout(self) -> tuple[float, float]:
@@ -72,4 +81,5 @@ class ShopifyConfig:
             access_token=os.environ.get("SHOPIFY_ACCESS_TOKEN") or None,
             client_id=os.environ.get("SHOPIFY_CLIENT_ID") or None,
             client_secret=os.environ.get("SHOPIFY_CLIENT_SECRET") or None,
+            api=os.environ.get("SHOPIFY_API") or "graphql",
         )

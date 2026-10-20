@@ -310,3 +310,44 @@ Registro breve de decisiones de diseño y su motivo.
   del día anterior; regenerar sus plantillas invitaría a subirlas dos veces.
 - **Código de salida:** el de la extracción si falló; si no, el de las plantillas (4 = hay
   pedidos que no se pueden cargar). `ejecuciones.csv` registra el resultado de cada paso.
+
+## 032 · Aviso por correo de la corrida diaria (2026-10-20)
+
+- **Decisión:** al final de `ejecutar_pipeline.ps1` se ejecuta `shopify-pipeline notificar`, que
+  envía por Gmail (SMTP con contraseña de aplicación) un resumen diario a TI: resultado de cada
+  paso, conteo de clientes y pedidos listos, pedidos excluidos y alertas por código.
+  `NOTIFICAR_SOLO_FALLOS=true` lo limita a los fallos.
+- **Privacidad:** el correo no lleva datos de clientes ni adjunta las plantillas; solo conteos y
+  rutas.
+- **Robustez:** sin configuración no envía nada; si el envío falla, queda en la bitácora y no
+  cambia el código de salida de la corrida.
+
+## 033 · GraphQL Admin API por defecto, REST de respaldo (2026-10-20)
+
+- **Decisión:** los pedidos se leen con la GraphQL Admin API (`shopify/graphql_orders.py`).
+  `SHOPIFY_API=rest` vuelve a la REST API sin tocar código.
+- **Motivo:** la REST Admin API es *legacy* desde el 1-oct-2024 y desde el 1-abr-2025 las
+  apps públicas nuevas deben usar solo GraphQL. Además, con GraphQL la bodega llega en la
+  misma consulta: desaparece la llamada extra por pedido (`fulfillment_orders.json`), que era
+  lo más lento de la extracción (decisión 016).
+- **Diseño:** `a_formato_rest` convierte cada pedido de GraphQL al diccionario que entregaba
+  REST. La transformación, el ledger, las plantillas y el formato del JSONL no cambian. Una
+  prueba verifica que el pedido #1006 da exactamente las mismas filas por las dos APIs.
+- **Costo:** 3 pedidos por página (~780 de 1.000 puntos); si Shopify responde
+  `MAX_COST_EXCEEDED`, la página se achica a la mitad. `THROTTLED` se reintenta tras esperar
+  los puntos que faltan; con menos del 20 % de puntos disponibles se hace una pausa preventiva.
+- **Riesgo:** no se ha probado contra la tienda real (sin credenciales). Los nombres de campos
+  se tomaron de la documentación oficial de la versión vigente. La primera corrida real lo
+  valida; si algo falla, `SHOPIFY_API=rest`.
+
+## 034 · El exporte de Siesa para la conciliación queda manual (2026-10-20)
+
+- **Decisión:** la persona encargada baja a mano el exporte de pedidos de Siesa y lo guarda en
+  `data/siesa/exportes/` (R-20 opción C). No se construye un agente o robot por ahora.
+- **Motivo:** Siesa solo se usa por escritorio remoto a su nube, sin acceso a la base de datos ni
+  a un servicio web. Automatizarlo exigiría un robot de pantalla sobre el escritorio remoto:
+  frágil ante cambios de pantalla y con credenciales guardadas. El exporte toma un par de
+  minutos.
+- **Pendiente para quien siga:** preguntar a Siesa si el reporte se puede programar por correo
+  (el pipeline lo leería de Gmail); si no, evaluar Power Automate Desktop. Detalle en
+  `ejecucion_programada.md`, *Mejoras para quien siga*.

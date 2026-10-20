@@ -1,5 +1,5 @@
 """
-Cliente HTTP para la REST Admin API de Shopify.
+Cliente HTTP para la Admin API de Shopify: GraphQL (la que se usa) y REST (respaldo).
 
 QUÉ HACE
     Es el único archivo que "habla" con Shopify. Todos los demás le piden datos a él.
@@ -10,7 +10,8 @@ RESPONSABILIDADES
        (ver ``exceptions.py``).
     3. Reintentar cuando el error es temporal (429, 5xx, caída de red).
     4. Frenar a tiempo para no superar el límite de llamadas de Shopify.
-    5. Recorrer todas las páginas de un listado.
+    5. Recorrer todas las páginas de un listado (REST).
+    6. Enviar consultas GraphQL (``graphql``) y traducir sus errores.
 
 EL LÍMITE DE LLAMADAS (leaky bucket o "balde con fuga")
     Shopify le da a cada tienda un balde de 40 llamadas (400 en Shopify Plus). Cada
@@ -18,6 +19,11 @@ EL LÍMITE DE LLAMADAS (leaky bucket o "balde con fuga")
     Si el balde se llena, Shopify responde 429 ("demasiadas peticiones").
     Cada respuesta trae la cabecera ``X-Shopify-Shop-Api-Call-Limit: 36/40`` que dice
     cuán lleno está. Si pasa del 80 %, esperamos a que baje al 50 % antes de seguir.
+
+    En GraphQL el balde se mide en *puntos de costo* (cada campo pedido cuesta puntos) y la
+    respuesta trae el estado en ``extensions.cost.throttleStatus``: puntos disponibles,
+    máximo y cuántos se recuperan por segundo. Se frena igual: si queda menos del 20 %,
+    se espera a recuperar la mitad. Si Shopify responde ``THROTTLED``, se reintenta.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from shopify_pipeline.config import ShopifyConfig
 from shopify_pipeline.exceptions import (
     ShopifyAuthError,
     ShopifyClientError,
+    ShopifyCostoExcedidoError,
     ShopifyNotFoundError,
     ShopifyPermissionError,
     ShopifyRetryableError,
@@ -109,10 +116,15 @@ class ShopifyClient:
         self._sleep(pausa)
 
     # ----------------------------------------------------------- una sola petición
-    def _pedir_una_vez(self, url: str, params: dict[str, Any] | None) -> requests.Response:
+    def _pedir_una_vez(
+        self, url: str, params: dict[str, Any] | None, json: dict[str, Any] | None = None
+    ) -> requests.Response:
         """Hace UNA petición y traduce el código HTTP a éxito o a un error con nombre."""
         headers = {"X-Shopify-Access-Token": self.token_provider.get_token()}
-        resp = self.session.get(url, params=params, headers=headers, timeout=self.config.timeout)
+        if json is None:
+            resp = self.session.get(url, params=params, headers=headers, timeout=self.config.timeout)
+        else:
+            resp = self.session.post(url, json=json, headers=headers, timeout=self.config.timeout)
         status = resp.status_code
 
         if status == 200:
@@ -143,7 +155,9 @@ class ShopifyClient:
         raise ShopifyClientError(f"{detalle}: {resp.text[:500]}")
 
     # ------------------------------------------------------------ con reintentos
-    def _pedir_con_reintentos(self, url: str, params: dict[str, Any] | None) -> requests.Response:
+    def _pedir_con_reintentos(
+        self, url: str, params: dict[str, Any] | None, json: dict[str, Any] | None = None
+    ) -> requests.Response:
         """
         Llama a ``_pedir_una_vez`` hasta ``max_attempts`` veces si el error es temporal.
         Los errores definitivos (401, 403, 404...) salen de inmediato: reintentarlos no
@@ -152,7 +166,9 @@ class ShopifyClient:
         intentos = self.config.max_attempts
         for intento in range(1, intentos + 1):
             try:
-                return self._pedir_una_vez(url, params)
+                if json is None:
+                    return self._pedir_una_vez(url, params)
+                return self._graphql_una_vez(url, json)
             except ERRORES_TEMPORALES as error:
                 if intento == intentos:
                     raise  # Se acabaron los intentos: el error sube a quien llamó.
@@ -183,6 +199,77 @@ class ShopifyClient:
                 raise
             logger.warning("401 recibido; renovando token y reintentando una vez.")
             return self._pedir_con_reintentos(url, params)
+
+    # ------------------------------------------------------------------ GraphQL
+    def _graphql_una_vez(self, url: str, payload: dict[str, Any]) -> requests.Response:
+        """
+        Una consulta GraphQL. Shopify responde 200 aunque la consulta falle: los errores
+        vienen en ``errors`` y aquí se traducen a los mismos errores con nombre de REST.
+        """
+        resp = self._pedir_una_vez(url, None, json=payload)
+        cuerpo = resp.json()
+        errores = cuerpo.get("errors") or []
+        if errores:
+            codigos = {(e.get("extensions") or {}).get("code", "") for e in errores}
+            texto = "; ".join(str(e.get("message", "")) for e in errores)[:500]
+            if "THROTTLED" in codigos:
+                raise ShopifyRetryableError(
+                    f"GraphQL: límite de costo alcanzado ({texto})", retry_after=self._espera_costo(cuerpo)
+                )
+            if "ACCESS_DENIED" in codigos:
+                raise ShopifyPermissionError(
+                    f"GraphQL: acceso denegado ({texto}). Revise los scopes de la app: read_orders, "
+                    "read_all_orders, read_merchant_managed_fulfillment_orders y read_locations."
+                )
+            if "MAX_COST_EXCEEDED" in codigos:
+                raise ShopifyCostoExcedidoError(f"GraphQL: la consulta cuesta demasiado ({texto})")
+            if "INTERNAL_SERVER_ERROR" in codigos:
+                raise ShopifyRetryableError(f"GraphQL: error interno de Shopify ({texto})")
+            raise ShopifyClientError(f"GraphQL: {texto}")
+        self._frenar_por_costo(cuerpo)
+        return resp
+
+    @staticmethod
+    def _throttle(cuerpo: dict[str, Any]) -> dict[str, Any]:
+        return ((cuerpo.get("extensions") or {}).get("cost") or {}).get("throttleStatus") or {}
+
+    def _espera_costo(self, cuerpo: dict[str, Any]) -> float:
+        """Segundos hasta recuperar los puntos que pidió la consulta (THROTTLED)."""
+        estado = self._throttle(cuerpo)
+        costo = ((cuerpo.get("extensions") or {}).get("cost") or {}).get("requestedQueryCost") or 0
+        disponible = float(estado.get("currentlyAvailable") or 0)
+        recupera = float(estado.get("restoreRate") or 50)
+        return min(max((costo - disponible) / recupera, 1.0), ESPERA_MAXIMA)
+
+    def _frenar_por_costo(self, cuerpo: dict[str, Any]) -> None:
+        estado = self._throttle(cuerpo)
+        try:
+            maximo = float(estado["maximumAvailable"])
+            disponible = float(estado["currentlyAvailable"])
+            recupera = float(estado["restoreRate"]) or 50.0
+        except (KeyError, TypeError, ValueError):
+            return
+        if maximo <= 0 or disponible / maximo > 1 - self.config.throttle_threshold:
+            return
+        pausa = (maximo * 0.5 - disponible) / recupera
+        logger.debug("Costo GraphQL: %s/%s disponibles; pausa preventiva de %.1fs", disponible, maximo, pausa)
+        self._sleep(pausa)
+
+    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        """
+        Ejecuta una consulta GraphQL y devuelve ``data``. Mismos reintentos y renovación de
+        token que ``get``.
+        """
+        url = f"{self.base_url}/graphql.json"
+        payload = {"query": query, "variables": variables or {}}
+        try:
+            resp = self._pedir_con_reintentos(url, None, json=payload)
+        except ShopifyAuthError:
+            if not self.token_provider.invalidate():
+                raise
+            logger.warning("401 recibido; renovando token y reintentando una vez.")
+            resp = self._pedir_con_reintentos(url, None, json=payload)
+        return resp.json().get("data") or {}
 
     # ------------------------------------------------------------------ páginas
     def paginate(self, path: str, params: dict[str, Any]) -> Iterator[requests.Response]:

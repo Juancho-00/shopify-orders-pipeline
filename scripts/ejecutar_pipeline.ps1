@@ -18,7 +18,9 @@
        bloqueado por Excel o por Drive), espera y lo reintenta una vez. Los demás códigos
        no se reintentan: esperar no los arregla.
     5. Anota el resultado de los dos pasos en data\logs\ejecuciones.csv.
-    6. Devuelve un código de salida para el Programador de tareas: el de la extracción si
+    6. Envía el aviso por correo (shopify-pipeline notificar). Si el correo no está
+       configurado en el .env, o falla, la corrida no se marca como fallida por eso.
+    7. Devuelve un código de salida para el Programador de tareas: el de la extracción si
        falló; si no, el de las plantillas (4 = hay pedidos que no se pueden cargar y
        quedaron en data\logs\plantillas_<run_id>.csv).
 
@@ -159,5 +161,11 @@ Write-Output "Extracción: $(Get-Significado $extraccion.Codigo) ($($extraccion.
 if ($reporte -and $plantillas.Codigo -in @(0, 4)) {
     Write-Output "Plantillas para validar y subir (primero clientes, luego pedidos): data\siesa\cargas\"
 }
+# --- Aviso por correo (no cambia el código de salida) ---
+# PowerShell 5.1 no pasa argumentos vacíos a Python: --run-id solo va si hubo reporte.
+$argsAviso = @("notificar")
+if ($reporte) { $argsAviso += @("--run-id", ($reporte.BaseName -replace "^pedidos_siesa_", "")) }
+$null = Invoke-Pipeline $argsAviso
+
 Write-Output "Resultado: $significado (código $codigo, $duracion s)."
 exit $codigo

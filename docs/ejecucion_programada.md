@@ -16,6 +16,7 @@ persona encargada solo las **valida y las sube**.
 | Duración máxima | 1 hora | Si se queda colgado, Windows lo detiene |
 | Si el equipo estaba apagado | Corre apenas haya sesión iniciada | No se salta días; además, `--incremental` recupera el periodo perdido |
 | Historial | `data\logs\ejecuciones.csv` | Una línea por corrida: resultado general, resultado e intentos de cada paso y duración |
+| Aviso por correo | Cada mañana, al terminar (Gmail) | Si falló: qué paso y qué hacer. Si salió bien: cuántos clientes y pedidos quedaron listos y cuántos por revisar. Sin datos de clientes |
 | Nombre de la tarea | `Shopify Pipeline - Corrida diaria` | — |
 
 ## Configuración definida (2026-10-19)
@@ -75,7 +76,7 @@ pre-commit install                                   # revisión de secretos ant
 
 ```powershell
 pytest -q                          # deben pasar todas las pruebas
-shopify-pipeline --version         # shopify-pipeline 0.3.0
+shopify-pipeline --version         # shopify-pipeline 0.4.0
 ```
 
 **4. Copiar la ruta del `python.exe` del entorno** (la tarea la necesita, porque una tarea
@@ -121,6 +122,28 @@ tareas*.
 Mientras no haya credenciales, cada mañana la tarea terminará en `ERROR_CONFIGURACION`
 (código 2) sin hacer nada más. Si prefiere que no corra hasta tenerlas, desactívela:
 `Disable-ScheduledTask -TaskName "Shopify Pipeline - Corrida diaria"`.
+
+**6b. Activar el aviso por correo** (opcional, se puede hacer hoy)
+
+1. En la cuenta de Google que enviará los avisos (por ejemplo, una cuenta de TI), activar la
+   *verificación en dos pasos* y crear una **contraseña de aplicación** en
+   <https://myaccount.google.com/apppasswords> (nombre: `Shopify pipeline`). Google muestra
+   16 letras una sola vez: cópielas. Si la opción no aparece, el administrador de Google
+   Workspace debe permitir las contraseñas de aplicación.
+2. En el `.env`:
+
+   ```
+   NOTIFICAR_A=ti@empresa.com
+   SMTP_USUARIO=cuenta-que-envia@empresa.com
+   SMTP_CLAVE=abcd efgh ijkl mnop
+   # NOTIFICAR_SOLO_FALLOS=true     # solo si no quiere el resumen diario
+   ```
+
+3. Probar: `.\scripts\ejecutar_pipeline.ps1 -Python "<RUTA_PYTHON>"`. Sin credenciales de
+   Shopify debe llegar un correo con asunto `... · ERROR_CONFIGURACION`.
+
+Si el correo falla (clave mal, sin internet), la corrida no se marca como fallida por eso:
+el motivo queda en la bitácora del día.
 
 **7. Cuando Shopify entregue las credenciales**
 
@@ -193,8 +216,11 @@ shopify-pipeline conciliar
 ```
 
 Revisar `data\reconciliation\conciliacion_<fecha>.xlsx`: los `FALTA_EN_SIESA` salen primero.
-Los de vending salen como `NO_SE_CARGA` y no se buscan. A futuro se evaluará que un agente de
-IA haga la exportación desde Siesa.
+Los de vending salen como `NO_SE_CARGA` y no se buscan.
+
+> **El exporte de Siesa es manual (decisión del 2026-10-20).** Siesa solo se usa por
+> escritorio remoto a su nube, sin acceso directo a la base de datos, así que no hay una
+> forma confiable de bajarlo automáticamente. Ver *Mejoras para quien siga* al final.
 
 **A quién escalar:**
 
@@ -224,7 +250,22 @@ registrar en el nuevo. Nunca dos equipos con la tarea activa al mismo tiempo.
 
 ## Pendiente
 
-- [ ] Pasos 1 a 6 de la instalación (se pueden hacer ya, sin credenciales).
+- [x] Pasos 1 a 6 de la instalación: tarea registrada el 2026-10-20.
 - [ ] Paso 7 cuando Shopify entregue el Client ID y el Client Secret.
 - [ ] Definir quién reemplaza en la revisión diaria (asistente o digitador) y capacitarlo.
-- [ ] Evaluar un agente de IA para la exportación de Siesa de la conciliación.
+
+## Mejoras para quien siga
+
+**Robot para bajar el exporte de Siesa.** Hoy el exporte para la conciliación se baja a mano
+(un par de minutos). Opciones para automatizarlo, de más a menos confiable:
+
+1. **Preguntar a Siesa si el reporte de pedidos se puede programar para que llegue por
+   correo.** Si se puede, el pipeline lo leería cada mañana de la misma cuenta de Gmail de
+   los avisos y lo dejaría en `data\siesa\exportes\`, sin tocar el escritorio remoto.
+2. **Un robot de pantalla** (por ejemplo, Power Automate Desktop, gratis en Windows 10/11)
+   que abra el escritorio remoto de Siesa, genere el reporte y lo guarde en la carpeta.
+   Riesgos: se rompe si cambia la resolución, una ventana o un menú de Siesa; necesita
+   guardar el usuario y la contraseña del escritorio remoto (en el administrador de
+   credenciales de Windows, nunca en el repositorio), y solo corre con la sesión abierta.
+
+Mientras tanto, la conciliación sigue el paso 5 de la *Revisión diaria*.

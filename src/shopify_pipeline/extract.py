@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +28,7 @@ from shopify_pipeline import __version__
 from shopify_pipeline.exceptions import ConfigError
 from shopify_pipeline.shopify.client import ShopifyClient
 from shopify_pipeline.shopify.fulfillment import BodegaEnricher
+from shopify_pipeline.shopify.graphql_orders import count_orders_graphql, extract_orders_graphql
 from shopify_pipeline.shopify.orders import OrderFilter, count_orders, extract_orders
 from shopify_pipeline.sinks.atomic import write_json_atomic
 from shopify_pipeline.sinks.jsonl import write_jsonl
@@ -56,6 +57,7 @@ class ExtractionResult:
     fields: list[str] | None = None  # None = pedido completo; lista = proyección con --fields
     incremental: bool = False
     bodegas_omitidas: int = 0  # Pedidos sin consulta de bodega por no ir al reporte
+    api: str = "rest"  # API con la que se extrajo: "graphql" o "rest"
     # Segundo conteo, solo si el primero no cuadró (ver ``run_extraction``). None = no hizo falta.
     recount_count: int | None = None
     pipeline_version: str = __version__
@@ -90,23 +92,35 @@ def run_extraction(
         raise ConfigError(f"Ya existe la extracción {output_file.name}; espere un segundo y reintente.")
     cfg = client.config
 
+    graphql = cfg.api == "graphql"
+    if graphql and flt.fields:
+        logger.warning("--fields solo aplica a la API REST: con GraphQL se ignora.")
+        flt = replace(flt, fields=None)
+    contar = count_orders_graphql if graphql else count_orders
+
     logger.info(
-        "Extrayendo pedidos de %s (API %s) | status=%s | %s %s → %s",
+        "Extrayendo pedidos de %s (%s %s) | status=%s | %s %s → %s",
         cfg.shop_domain,
+        "GraphQL" if graphql else "REST",
         cfg.api_version,
         flt.status,
         flt.date_field,
         flt.date_min.isoformat(),
         flt.date_max.isoformat(),
     )
-    expected = count_orders(client, flt)
+    expected = contar(client, flt)
     logger.info("Shopify reporta %d pedidos en la ventana.", expected)
 
     t0 = time.perf_counter()
-    orders = extract_orders(client, flt)
-    enricher = BodegaEnricher(client, debe_consultar_bodega) if consultar_bodega else None
-    if enricher:
-        orders = enricher.enrich(orders)
+    if graphql:
+        # GraphQL trae la bodega en la misma consulta: no hay llamadas extra por pedido.
+        orders = extract_orders_graphql(client, flt)
+        enricher = None
+    else:
+        orders = extract_orders(client, flt)
+        enricher = BodegaEnricher(client, debe_consultar_bodega) if consultar_bodega else None
+        if enricher:
+            orders = enricher.enrich(orders)
     written = write_jsonl(orders, output_file)
     duration = round(time.perf_counter() - t0, 2)
 
@@ -117,7 +131,7 @@ def run_extraction(
         # date_max) o se eliminó. Un segundo conteo lo confirma: si coincide con lo extraído,
         # la diferencia está explicada y la próxima corrida incremental recoge esos pedidos.
         # Si tampoco coincide, se perdió algo de verdad (p. ej. en la paginación).
-        recount = count_orders(client, flt)
+        recount = contar(client, flt)
         logger.info("El conteo no cuadró (%d vs %d); segundo conteo: %d.", expected, written, recount)
 
     result = ExtractionResult(
@@ -130,13 +144,14 @@ def run_extraction(
         date_max=flt.date_max.isoformat(),
         expected_count=expected,
         written_count=written,
-        bodegas_consultadas=enricher.enriched if enricher else 0,
+        bodegas_consultadas=written if graphql else (enricher.enriched if enricher else 0),
         duration_seconds=duration,
         output_file=output_file.name,
         fields=list(flt.fields) if flt.fields else None,
         incremental=incremental,
         bodegas_omitidas=enricher.omitidos if enricher else 0,
         recount_count=recount,
+        api=cfg.api,
     )
     _write_manifest(result, output_dir / f"{run_id}.manifest.json")
 
