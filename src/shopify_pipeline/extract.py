@@ -6,6 +6,10 @@ Cada corrida genera dos archivos con el mismo ``run_id``:
     data/raw/shopify/orders/<run_id>.jsonl          # un pedido por línea (+ sus bodegas)
     data/raw/shopify/orders/<run_id>.manifest.json  # metadatos de la corrida (ventana, conteos, versión)
 
+Y, solo si Shopify entregó pedidos con una estructura inesperada (GraphQL)::
+
+    data/raw/shopify/orders/<run_id>.rechazados.json  # qué pedidos se descartaron y por qué
+
 El manifiesto es el contrato con las etapas siguientes: ``transform`` lo lee para saber si
 la extracción cuadró y si se hizo con ``--fields`` (proyección de campos).
 
@@ -26,9 +30,14 @@ from typing import Any
 
 from shopify_pipeline import __version__
 from shopify_pipeline.exceptions import ConfigError
+from shopify_pipeline.logs import metricas_etapa, set_run_id
 from shopify_pipeline.shopify.client import ShopifyClient
 from shopify_pipeline.shopify.fulfillment import BodegaEnricher
-from shopify_pipeline.shopify.graphql_orders import count_orders_graphql, extract_orders_graphql
+from shopify_pipeline.shopify.graphql_orders import (
+    EstadisticasGraphQL,
+    count_orders_graphql,
+    extract_orders_graphql,
+)
 from shopify_pipeline.shopify.orders import OrderFilter, count_orders, extract_orders
 from shopify_pipeline.sinks.atomic import write_json_atomic
 from shopify_pipeline.sinks.jsonl import write_jsonl
@@ -60,6 +69,10 @@ class ExtractionResult:
     api: str = "rest"  # API con la que se extrajo: "graphql" o "rest"
     # Segundo conteo, solo si el primero no cuadró (ver ``run_extraction``). None = no hizo falta.
     recount_count: int | None = None
+    # Pedidos descartados por payload inesperado (detalle en <run_id>.rechazados.json).
+    rechazados: int = 0
+    lotes_api: int = 0  # Páginas pedidas a la API (GraphQL)
+    costo_real_api: float = 0.0  # Suma de actualQueryCost (GraphQL)
     pipeline_version: str = __version__
     schema_version: int = MANIFEST_SCHEMA_VERSION
 
@@ -86,10 +99,31 @@ def run_extraction(
 ) -> ExtractionResult:
     """Extrae pedidos (y su bodega), los escribe en JSONL y genera el manifiesto."""
     run_id = run_id or new_run_id()
+    set_run_id(run_id)
     output_file = output_dir / f"{run_id}.jsonl"
     if output_file.exists():
         # La zona raw es inmutable: una extracción nunca reemplaza a otra.
         raise ConfigError(f"Ya existe la extracción {output_file.name}; espere un segundo y reintente.")
+    with metricas_etapa("extract") as metricas:
+        result = _extraer(client, flt, output_dir, run_id, output_file, consultar_bodega, incremental,
+                          debe_consultar_bodega)  # fmt: skip
+        metricas.ok, metricas.corruptas = result.written_count, result.rechazados
+        metricas.extra.update(esperados=result.expected_count, cuadra=result.reconciled, api=result.api)
+        if result.api == "graphql":
+            metricas.extra.update(lotes=result.lotes_api, costo_real=result.costo_real_api)
+    return result
+
+
+def _extraer(
+    client: ShopifyClient,
+    flt: OrderFilter,
+    output_dir: Path,
+    run_id: str,
+    output_file: Path,
+    consultar_bodega: bool,
+    incremental: bool,
+    debe_consultar_bodega: Callable[[dict[str, Any]], bool] | None,
+) -> ExtractionResult:
     cfg = client.config
 
     graphql = cfg.api == "graphql"
@@ -112,9 +146,10 @@ def run_extraction(
     logger.info("Shopify reporta %d pedidos en la ventana.", expected)
 
     t0 = time.perf_counter()
+    stats = EstadisticasGraphQL()
     if graphql:
         # GraphQL trae la bodega en la misma consulta: no hay llamadas extra por pedido.
-        orders = extract_orders_graphql(client, flt)
+        orders = extract_orders_graphql(client, flt, stats=stats)
         enricher = None
     else:
         orders = extract_orders(client, flt)
@@ -123,6 +158,15 @@ def run_extraction(
             orders = enricher.enrich(orders)
     written = write_jsonl(orders, output_file)
     duration = round(time.perf_counter() - t0, 2)
+    if stats.rechazados:
+        rechazados_file = output_dir / f"{run_id}.rechazados.json"
+        write_json_atomic(stats.rechazados, rechazados_file)
+        logger.error(
+            "%d pedidos descartados por datos inesperados de Shopify (detalle en %s). La extracción "
+            "no cuadrará y la próxima corrida los reintentará.",
+            len(stats.rechazados),
+            rechazados_file,
+        )
 
     recount = None
     if written != expected:
@@ -152,6 +196,9 @@ def run_extraction(
         bodegas_omitidas=enricher.omitidos if enricher else 0,
         recount_count=recount,
         api=cfg.api,
+        rechazados=len(stats.rechazados),
+        lotes_api=stats.paginas,
+        costo_real_api=stats.costo_real,
     )
     _write_manifest(result, output_dir / f"{run_id}.manifest.json")
 

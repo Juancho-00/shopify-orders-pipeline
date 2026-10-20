@@ -1,8 +1,8 @@
 """
-Extracción con GraphQL. Shopify se simula con ``responses``: ninguna prueba sale a internet.
+ExtracciÃ³n con GraphQL. Shopify se simula con ``responses``: ninguna prueba sale a internet.
 
 La prueba clave es ``test_graphql_y_rest_dan_el_mismo_reporte``: el mismo pedido #1006,
-leído por REST y por GraphQL, debe producir exactamente las mismas filas para Siesa.
+leÃ­do por REST y por GraphQL, debe producir exactamente las mismas filas para Siesa.
 """
 
 from __future__ import annotations
@@ -20,10 +20,15 @@ from shopify_pipeline.extract import run_extraction
 from shopify_pipeline.shopify.client import ShopifyClient
 from shopify_pipeline.shopify.fulfillment import FULFILLMENT_KEY, _slim
 from shopify_pipeline.shopify.graphql_orders import (
+    BODEGAS_POR_PEDIDO,
+    LINEAS_POR_PAGINA,
+    ORDERS_QUERY,
+    EstadisticasGraphQL,
     a_formato_rest,
     count_orders_graphql,
     extract_orders_graphql,
     search_query,
+    siguiente_tamano,
 )
 from shopify_pipeline.shopify.orders import OrderFilter
 from shopify_pipeline.transform.siesa_lines import order_to_lines
@@ -57,7 +62,7 @@ def _conteo(n):
     return {"data": {"ordersCount": {"count": n, "precision": "EXACT"}}}
 
 
-# -------------------------------------------------------------- conversión
+# -------------------------------------------------------------- conversiÃ³n
 def test_graphql_y_rest_dan_el_mismo_reporte(nodo):
     rest = json.loads((FIXTURES / "order_1006.json").read_text(encoding="utf-8"))
     fos = json.loads((FIXTURES / "fulfillment_orders_1006.json").read_text(encoding="utf-8"))
@@ -77,8 +82,8 @@ def test_graphql_y_rest_dan_el_mismo_reporte(nodo):
 def test_conversion_de_campos(nodo):
     pedido = a_formato_rest(nodo)
     assert (pedido["id"], pedido["name"], pedido["order_number"]) == (18931603603821, "#1006", 1006)
-    assert pedido["financial_status"] == "pending"  # PENDING → como en REST
-    assert pedido["line_items"][0]["id"] == 50783188156781  # gid://shopify/LineItem/... → número
+    assert pedido["financial_status"] == "pending"  # PENDING â†’ como en REST
+    assert pedido["line_items"][0]["id"] == 50783188156781  # gid://shopify/LineItem/... â†’ nÃºmero
     assert pedido["line_items"][0]["price"] == "89999.0"
     assert pedido["shipping_lines"][0]["discounted_price"] == "12294.34"
     bodega = pedido[FULFILLMENT_KEY][0]
@@ -186,7 +191,7 @@ def test_throttled_espera_y_reintenta(gql_client, flt, respuesta, sleeps):
 
 @responses.activate
 def test_pausa_preventiva_cuando_quedan_pocos_puntos(gql_client, flt, respuesta, sleeps):
-    respuesta["extensions"]["cost"]["throttleStatus"]["currentlyAvailable"] = 200.0  # 10 % del máximo
+    respuesta["extensions"]["cost"]["throttleStatus"]["currentlyAvailable"] = 200.0  # 10 % del mÃ¡ximo
     responses.post(URL, json=respuesta)
     list(extract_orders_graphql(gql_client, flt))
     assert sleeps == [pytest.approx(8.0)]  # (1000 - 200) / 100
@@ -209,7 +214,7 @@ def test_run_extraction_con_graphql(gql_client, flt, respuesta, tmp_path):
 
     assert result.reconciled and result.api == "graphql"
     assert result.bodegas_consultadas == 1
-    assert len(responses.calls) == 2  # conteo + 1 página: sin llamadas extra por pedido para la bodega
+    assert len(responses.calls) == 2  # conteo + 1 pÃ¡gina: sin llamadas extra por pedido para la bodega
     (linea,) = (tmp_path / "RUN1.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(linea)[FULFILLMENT_KEY][0]["assigned_location"]["name"] == "D'Luchi PT Guarne"
     manifiesto = json.loads((tmp_path / "RUN1.manifest.json").read_text(encoding="utf-8"))
@@ -226,3 +231,89 @@ def test_graphql_es_la_api_por_defecto(monkeypatch):
     monkeypatch.setenv("SHOPIFY_SHOP_DOMAIN", SHOP)
     monkeypatch.setenv("SHOPIFY_ACCESS_TOKEN", "x")
     assert ShopifyConfig.from_env().api == "graphql"
+
+
+# ------------------------------------------------------- costo y tamaÃ±o de pÃ¡gina
+def test_siguiente_tamano():
+    assert siguiente_tamano(3, 300) == 9  # 100 puntos por pedido â†’ 900 / 100
+    assert siguiente_tamano(10, 5000) == 1  # nunca menos de 1
+    assert siguiente_tamano(1, 1) == 50  # tope MAX_PEDIDOS_POR_PAGINA
+    assert siguiente_tamano(4, None) == 4  # sin dato de costo, se mantiene
+
+
+@responses.activate
+def test_pagina_se_ajusta_con_el_costo_reportado(gql_client, flt, respuesta):
+    primera = copy.deepcopy(respuesta)
+    primera["data"]["orders"]["pageInfo"] = {"hasNextPage": True, "endCursor": "C1"}
+    primera["extensions"]["cost"]["requestedQueryCost"] = 300  # pedido con first=3 â†’ 100 c/u
+    segunda = copy.deepcopy(respuesta)
+    segunda["data"]["orders"]["nodes"][0] |= {"id": "gid://shopify/Order/2", "legacyResourceId": "2"}
+    responses.post(URL, json=primera)
+    responses.post(URL, json=segunda)
+
+    stats = EstadisticasGraphQL()
+    list(extract_orders_graphql(gql_client, flt, por_pagina=3, stats=stats))
+
+    assert [_consulta(c.request)[1]["first"] for c in responses.calls] == [3, 9]
+    assert stats.paginas == 2
+    assert stats.costo_real == 80  # 40 + 40 (actualQueryCost del fixture)
+
+
+def test_consulta_pide_conexiones_pequenas():
+    """Los first: anidados multiplican el costo: se piden pocos y el resto se pagina."""
+    assert f"lineItems(first: {LINEAS_POR_PAGINA})" in ORDERS_QUERY
+    assert f"fulfillmentOrders(first: {BODEGAS_POR_PEDIDO})" in ORDERS_QUERY
+    assert LINEAS_POR_PAGINA <= 5 and BODEGAS_POR_PEDIDO <= 2
+
+
+@responses.activate
+def test_bodegas_y_lineas_de_bodega_que_desbordan_se_paginan(gql_client, flt, respuesta):
+    nodo = respuesta["data"]["orders"]["nodes"][0]
+    nodo["fulfillmentOrders"]["pageInfo"] = {"hasNextPage": True, "endCursor": "FO1"}
+    nodo["fulfillmentOrders"]["nodes"][0]["lineItems"]["pageInfo"] = {"hasNextPage": True, "endCursor": "FL1"}
+    otro_grupo = copy.deepcopy(nodo["fulfillmentOrders"]["nodes"][0])
+    otro_grupo |= {"id": "gid://shopify/FulfillmentOrder/77"}
+    otro_grupo["lineItems"] = {
+        "pageInfo": {"hasNextPage": False},
+        "nodes": [{"totalQuantity": 2, "lineItem": {"id": "gid://shopify/LineItem/888"}}],
+    }
+    mas_bodegas = {"data": {"order": {"fulfillmentOrders": {"pageInfo": {"hasNextPage": False},
+                                                            "nodes": [otro_grupo]}}}}  # fmt: skip
+    mas_lineas_bodega = {"data": {"fulfillmentOrder": {"lineItems": {"pageInfo": {"hasNextPage": False},
+        "nodes": [{"totalQuantity": 1, "lineItem": {"id": "gid://shopify/LineItem/999"}}]}}}}  # fmt: skip
+    responses.post(URL, json=respuesta)
+    responses.post(URL, json=mas_bodegas)
+    responses.post(URL, json=mas_lineas_bodega)
+
+    (pedido,) = extract_orders_graphql(gql_client, flt)
+
+    grupos = pedido[FULFILLMENT_KEY]
+    assert [g["id"] for g in grupos][1] == 77
+    assert [li["line_item_id"] for li in grupos[0]["line_items"]] == [50783188156781, 999]
+    consultas = [_consulta(c.request) for c in responses.calls[1:]]
+    assert "MasBodegas" in consultas[0][0] and consultas[0][1]["after"] == "FO1"
+    assert "MasLineasBodega" in consultas[1][0] and consultas[1][1]["after"] == "FL1"
+
+
+# ------------------------------------------------------------ payload corrupto
+@responses.activate
+def test_pedido_con_payload_inesperado_se_descarta_y_la_corrida_sigue(
+    gql_client, flt, respuesta, tmp_path, caplog
+):
+    roto = copy.deepcopy(respuesta["data"]["orders"]["nodes"][0])
+    roto |= {"id": "gid://shopify/Order/2", "legacyResourceId": "2", "name": "#1007", "lineItems": "basura"}
+    respuesta["data"]["orders"]["nodes"].append(roto)
+    responses.post(URL, json=_conteo(2))
+    responses.post(URL, json=respuesta)
+    responses.post(URL, json=_conteo(2))  # segundo conteo: sigue en 2 â†’ no cuadra
+
+    caplog.set_level("INFO", logger="shopify_pipeline")
+    result = run_extraction(gql_client, flt, output_dir=tmp_path, run_id="RUN9")
+
+    assert (result.written_count, result.rechazados) == (1, 1)
+    assert not result.reconciled  # â†’ el watermark no avanza y se reintenta en la prÃ³xima corrida
+    (rechazado,) = json.loads((tmp_path / "RUN9.rechazados.json").read_text(encoding="utf-8"))
+    assert rechazado["pedido"] == "#1007" and rechazado["error"].startswith("AttributeError")
+    manifiesto = json.loads((tmp_path / "RUN9.manifest.json").read_text(encoding="utf-8"))
+    assert manifiesto["rechazados"] == 1
+    assert "etapa=extract estado=ok ok=1 corruptas=1" in caplog.text

@@ -100,7 +100,12 @@ def _filas_hoja(path: Path, hoja: str) -> int | None:
 
     wb = load_workbook(path, read_only=True)
     try:
-        return max(0, (wb[hoja].max_row or 1) - 1)
+        ws = wb[hoja]
+        # No se confía en la dimensión declarada por el archivo: los escritos en modo
+        # streaming (o re-guardados por otras herramientas) pueden no traerla. Contar las
+        # filas recorriéndolas sigue siendo de memoria constante en modo read_only.
+        ws.reset_dimensions()
+        return sum(1 for _ in ws.iter_rows(min_row=2, values_only=True))
     finally:
         wb.close()
 

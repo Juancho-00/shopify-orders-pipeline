@@ -28,6 +28,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from shopify_pipeline.logs import metricas_etapa, set_run_id
 from shopify_pipeline.reconciliation.siesa_export import ExporteSiesa, leer_exporte
 from shopify_pipeline.sinks.tabular import write_csv, write_xlsx
 from shopify_pipeline.transform.catalogos import bodega_no_se_carga
@@ -136,6 +137,25 @@ def conciliar(
     columna: str | None = None,
     ahora: datetime | None = None,
 ) -> Conciliacion:
+    marca = (ahora or datetime.now(timezone.utc)).astimezone(BOGOTA).strftime("%Y%m%dT%H%M%S")
+    set_run_id(f"conciliacion_{marca}")
+    with metricas_etapa("conciliar") as metricas:
+        resultado = _conciliar(exporte_file, processed_dir, output_dir, desde, columna, marca)
+        metricas.ok = len(resultado.filas)
+        metricas.extra.update(
+            faltantes=resultado.faltantes, referencias_siesa=len(resultado.exporte.referencias)
+        )
+    return resultado
+
+
+def _conciliar(
+    exporte_file: Path,
+    processed_dir: Path,
+    output_dir: Path,
+    desde: date | None,
+    columna: str | None,
+    marca: str,
+) -> Conciliacion:
     exporte = leer_exporte(exporte_file, columna)
     logger.info(
         "Exporte Siesa %s: %d referencias en la columna '%s'.",
@@ -160,7 +180,6 @@ def conciliar(
     # Primero los que faltan: es lo que hay que revisar.
     filas.sort(key=lambda f: _ORDEN_ESTADOS[str(f["estado"])])
 
-    marca = (ahora or datetime.now(timezone.utc)).astimezone(BOGOTA).strftime("%Y%m%dT%H%M%S")
     csv_file = output_dir / f"conciliacion_{marca}.csv"
     xlsx_file = output_dir / f"conciliacion_{marca}.xlsx"
     write_csv(filas, csv_file, COLUMNAS)

@@ -50,6 +50,7 @@ from shopify_pipeline.erp.pedidos import (
 )
 from shopify_pipeline.erp.terceros import COLUMNAS_NUMERICAS, TERCEROS_COLUMNS, fila_tercero
 from shopify_pipeline.exceptions import ConfigError
+from shopify_pipeline.logs import metricas_etapa, set_run_id
 from shopify_pipeline.sinks.atomic import atomic_target
 from shopify_pipeline.sinks.tabular import write_csv
 from shopify_pipeline.transform.alertas import EVENT_COLUMNS, Evento
@@ -115,6 +116,15 @@ HOJAS: dict[str, tuple[tuple[str, ...], frozenset[str]]] = {
 
 
 def _escribir_xlsx(hojas: dict[str, list[dict[str, str]]], path: Path) -> None:
+    """
+    Escribe las hojas de una plantilla de carga, con el formato puesto en cada fila al
+    agregarla (una sola pasada; antes se recorrían TODAS las celdas otra vez al final).
+
+    A propósito NO usa el modo *streaming* (``write_only``) de ``sinks/tabular.py``: ese
+    modo no escribe la etiqueta ``<dimension>`` de la hoja y estos archivos los lee el
+    importador de Siesa, que no se puede probar aquí. El volumen de una plantilla es
+    pequeño; no vale el riesgo en el sistema destino.
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
@@ -126,13 +136,16 @@ def _escribir_xlsx(hojas: dict[str, list[dict[str, str]]], path: Path) -> None:
         ws.append(list(columnas))
         for celda in ws[1]:
             celda.font = Font(bold=True)
-        for fila in filas:
-            ws.append([int(fila[c]) if c in numericas and fila[c].isdigit() else fila[c] for c in columnas])
-        # Texto (@) para conservar ceros a la izquierda: 001, 05, 03D, fechas AAAAMMDD...
-        for fila_celdas in ws.iter_rows(min_row=2):
-            for celda in fila_celdas:
-                if isinstance(celda.value, str):
-                    celda.number_format = "@"
+        # ``ws.cell(fila, columna)`` es O(1). (``ws[ws.max_row]`` recalcula el máximo de toda
+        # la hoja en cada fila: O(n²), con 3.000 pedidos pasaba de 18 s a 68 s.)
+        for r, fila in enumerate(filas, start=2):
+            for c_idx, c in enumerate(columnas, start=1):
+                valor = fila[c]
+                if c in numericas and valor.isdigit():
+                    ws.cell(row=r, column=c_idx, value=int(valor))
+                else:
+                    # Texto (@) para conservar ceros a la izquierda: 001, 05, 03D, fechas AAAAMMDD...
+                    ws.cell(row=r, column=c_idx, value=valor).number_format = "@"
         for i, col in enumerate(columnas, start=1):
             ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = max(12, len(col) + 2)
         ws.freeze_panes = "A2"
@@ -145,6 +158,18 @@ def generar_plantillas(
     output_dir: Path = DEFAULT_CARGAS_DIR,
     log_dir: Path = Path("data/logs"),
     fecha_carga: date | None = None,
+) -> PlantillasRun:
+    set_run_id(reporte.stem.removeprefix("pedidos_siesa_"))
+    with metricas_etapa("plantillas") as metricas:
+        run = _generar_plantillas(reporte, output_dir, log_dir, fecha_carga)
+        # "corruptas" = pedidos que no se cargan por datos incompletos (vending no cuenta).
+        metricas.ok, metricas.corruptas = run.pedidos, run.no_cargados
+        metricas.extra.update(clientes=run.terceros, vending=run.vending)
+    return run
+
+
+def _generar_plantillas(
+    reporte: Path, output_dir: Path, log_dir: Path, fecha_carga: date | None
 ) -> PlantillasRun:
     run_id = reporte.stem.removeprefix("pedidos_siesa_")
     fecha = (fecha_carga or date.today()).strftime("%Y%m%d")

@@ -162,6 +162,7 @@ una fila por evento. El log no incluye datos personales del cliente.
 | `YA_REPORTADO` | Exclusión | El pedido ya salió en el reporte de otra corrida (ventanas solapadas); no se repite |
 | `CAMBIO_POST_REPORTE` | Exclusión | Ya se reportó, pero su total cambió después (p. ej. un reembolso): revisar a mano en Siesa |
 | `DATOS_INCOMPLETOS` | Exclusión | Al pedido le faltan campos críticos (extracción con `--fields`) |
+| `ESQUEMA_INVALIDO` | Exclusión | Una fila del pedido no cumple el esquema (tipo, llave vacía, monto negativo o inconsistente). Se excluye el pedido completo |
 | `ERROR_TRANSFORMACION` | Exclusión | Un dato del pedido no se pudo procesar; la traza queda en la bitácora. Los demás pedidos siguen |
 
 Además, cada ejecución queda en la bitácora `data/logs/shopify_pipeline_AAAAMMDD.log`

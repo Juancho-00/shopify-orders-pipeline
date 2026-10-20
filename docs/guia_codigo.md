@@ -137,6 +137,12 @@ tarea programada sepa si debe reintentar (`1`) o avisar a una persona (los demá
 
 **Para qué:** que cada mensaje salga en pantalla y en `data/logs/shopify_pipeline_AAAAMMDD.log`.
 
+- Cada línea lleva `run=<run_id>`: `set_run_id` lo fija al empezar cada etapa (extracción,
+  transformación, plantillas, conciliación). Lo agrega una "fábrica" de registros de
+  `logging`, así ningún formato falla por falta del campo.
+- `metricas_etapa("transform")`: un `with` que mide la etapa y al salir deja UNA línea
+  `etapa=... estado=ok ok=N corruptas=M seg=S ...` (también si falla, con `estado=error`).
+
 Cada archivo crea su propio `logger = logging.getLogger(__name__)`. Como todos se llaman
 `shopify_pipeline.algo`, basta configurar el logger `shopify_pipeline` una vez y todos
 heredan esa configuración.
@@ -181,7 +187,7 @@ programada diera una instrucción equivocada.
 
 | Elemento             | Qué hace                                                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `run_extraction`   | Cuenta los pedidos → descarga → agrega bodegas → guarda JSONL → si no cuadra, cuenta otra vez (`recount_count`) → escribe manifiesto |
+| `run_extraction`   | Cuenta los pedidos → descarga → agrega bodegas → guarda JSONL (y `<run_id>.rechazados.json` si hubo pedidos descartados) → si no cuadra, cuenta otra vez (`recount_count`) → escribe manifiesto → línea de métricas |
 | `ExtractionResult` | El resumen de la corrida (ventana, conteos, duración).`reconciled` dice si lo descargado coincide con lo que reportó Shopify |
 | `new_run_id`       | Crea el identificador de la corrida a partir de la hora UTC:`20261014T150000Z`. Así los archivos quedan ordenados por fecha   |
 
@@ -237,11 +243,16 @@ llamada extra por pedido.
 | `ORDERS_QUERY` | La consulta GraphQL: qué campos se piden de cada pedido |
 | `search_query` | Traduce el filtro (`updated_at` entre dos fechas, estado) a la búsqueda de Shopify |
 | `count_orders_graphql` | Cuántos pedidos hay en la ventana (para comparar al final) |
-| `extract_orders_graphql` | Recorre las páginas con el cursor. Si la consulta "cuesta" demasiado, achica la página; si un pedido tiene muchas líneas, pide las que faltan |
+| `extract_orders_graphql` | Recorre las páginas con el cursor. Ajusta el tamaño de página al costo que reporta Shopify (`siguiente_tamano`); si la consulta "cuesta" demasiado, la achica. Acumula lotes, costo y rechazados en `EstadisticasGraphQL` |
+| `_todas_las_lineas` / `_todas_las_bodegas` | Si un pedido trae más líneas, grupos de bodega o líneas por grupo de los que pide la consulta, trae el resto con consultas aparte |
+| `_convertir` | Convierte un pedido aislado: si su estructura es inesperada, lo descarta y lo anota en `rechazados` (la corrida sigue) |
 | `a_formato_rest` | Convierte cada pedido al mismo formato que entregaba REST (`order_number`, `line_items`...). Por eso el resto del pipeline no cambió |
 
-**El costo:** GraphQL no cuenta llamadas sino "puntos" según los campos pedidos; una
-consulta no puede pasar de 1.000. Por eso se piden 3 pedidos por página.
+**El costo:** GraphQL no cuenta llamadas sino "puntos". Hay dos: el costo *solicitado*
+(Shopify lo calcula antes multiplicando los `first:` anidados; máximo 1.000 por consulta) y
+el *real* (lo que se descuenta del balde, ~40 por pedido). Por eso las conexiones anidadas
+piden pocos elementos (5 líneas, 2 grupos de bodega): así caben más pedidos por página y
+hay menos peticiones. El ritmo máximo lo pone el costo real, no el tamaño de página.
 
 ### `shopify/orders.py` — qué pedidos pedir
 
@@ -317,7 +328,7 @@ producto, más una de envío) y decidir qué pedidos no pasan.
 | `DEFAULT_ESTADOS_PAGO`                          | Qué cuenta como pago confirmado:`paid`, `partially_refunded`                                   |
 | `SiesaLinesOptions`                             | Opciones: código del envío, estados de pago, incluir cancelados o de prueba                       |
 | `CAMPOS_REQUERIDOS` / `CLAVES_CRITICAS`       | Campos que necesita la transformación / los que, si faltan, harían fallar los filtros en silencio |
-| `transform_orders`                              | Recorre todos los pedidos **aislando cada uno**: si uno falla, queda como `ERROR_TRANSFORMACION` y los demás siguen |
+| `transform_orders`                              | Recorre todos los pedidos **aislando cada uno**: si uno falla, queda como `ERROR_TRANSFORMACION` y los demás siguen; si sus filas no cumplen el esquema, `ESQUEMA_INVALIDO` |
 | `validar_contrato`                              | ¿Trae el pedido las claves críticas (`test`, `cancelled_at`, `financial_status`...)? Si no, `DATOS_INCOMPLETOS` |
 | `_motivo_exclusion`                             | ¿Es de prueba? ¿Está cancelado? ¿El pago no está confirmado?                                   |
 | `_motivo_ledger`                                | ¿Ya salió en el reporte de otra corrida? (`YA_REPORTADO` o, si su total cambió, `CAMBIO_POST_REPORTE`) |
@@ -327,6 +338,16 @@ producto, más una de envío) y decidir qué pedidos no pasan.
 | `TIPO_DOC_SIESA` / `IVA_ENVIO`                  | `CC` → `C`, `NIT` → `N` (R-10) / IVA del envío cuando Shopify no lo desglosa (R-07)                 |
 | `_descuento`, `_tasa`, `_notas`, `_first` | Ayudantes pequeños (descuento de la línea, tasa de IVA, notas, primer valor no vacío)            |
 | `PedidoTransformado` / `TransformResult`      | "Cajas" con el resultado: filas + alertas (de un pedido / de todos)                                 |
+
+### `transform/esquema.py` — el control de tipos antes de escribir
+
+**Para qué:** que ninguna fila con un tipo o valor imposible llegue al reporte ni a la
+carga. `ESQUEMA` dice, por columna, el tipo y la regla (texto no vacío, entero > 0, `Decimal`
+≥ 0...); las demás columnas solo deben ser texto. `validar_pedido` revisa TODAS las filas
+de un pedido: si una falla, se excluye el pedido completo (`ESQUEMA_INVALIDO`).
+
+No valida datos de negocio que pueden faltar (SKU, cédula): esos siguen siendo alertas y
+la fase 3 decide si el pedido se puede cargar (R-34).
 
 ### `transform/alertas.py` — el catálogo de alertas
 
@@ -361,6 +382,8 @@ el log de alertas.
 - `write_jsonl`: un pedido por línea. Formato ideal para guardar datos tal cual llegan.
 - `write_csv`: para sistemas (separador `,`, punto decimal, UTF-8).
 - `write_xlsx`: para personas. Los montos quedan como números reales y se ven bien en Excel en español.
+  Escribe en modo *streaming* (`write_only`): cada fila va al archivo al agregarla, sin
+  guardar un objeto por celda. Por eso los anchos y el panel congelado se fijan antes.
 
 Todos escriben de forma **atómica**: primero a un archivo temporal y, solo si todo salió
 bien, lo renombran al nombre final. Si algo falla a mitad de camino, no queda un archivo incompleto.

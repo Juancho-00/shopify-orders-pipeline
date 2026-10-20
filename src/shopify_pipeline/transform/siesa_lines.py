@@ -40,6 +40,7 @@ from shopify_pipeline.exceptions import DataError
 from shopify_pipeline.shopify.fulfillment import FULFILLMENT_KEY, location_by_line_item
 from shopify_pipeline.transform.alertas import Evento
 from shopify_pipeline.transform.catalogos import codigo_bodega, codigo_ciudad
+from shopify_pipeline.transform.esquema import validar_pedido
 from shopify_pipeline.transform.normalize import (
     TWO_PLACES,
     clean_text,
@@ -175,6 +176,10 @@ class PedidoTransformado:
         return [e.codigo for e in self.eventos]
 
 
+# Exclusiones que significan "el pedido no se pudo procesar" (no reglas de negocio).
+CODIGOS_ERROR: tuple[str, ...] = ("ERROR_TRANSFORMACION", "DATOS_INCOMPLETOS", "ESQUEMA_INVALIDO")
+
+
 @dataclass
 class TransformResult:
     rows: list[dict[str, Any]] = field(default_factory=list)
@@ -188,7 +193,7 @@ class TransformResult:
     @property
     def errores(self) -> int:
         """Pedidos que no se pudieron transformar (dato malo o campos faltantes)."""
-        return sum(self.pedidos_excluidos.get(c, 0) for c in ("ERROR_TRANSFORMACION", "DATOS_INCOMPLETOS"))
+        return sum(self.pedidos_excluidos.get(c, 0) for c in CODIGOS_ERROR)
 
     @property
     def alertas(self) -> list[Evento]:
@@ -545,6 +550,12 @@ def transform_orders(
                 continue
             transformado = order_to_lines(order, options)
             total = total_pedido(order)
+            # Antes de que el pedido llegue al reporte (y a la carga): tipos y reglas
+            # estructurales. Una fila mala excluye el pedido COMPLETO (ver esquema.py).
+            errores_esquema = validar_pedido(transformado.rows, COLUMNS)
+            if errores_esquema:
+                excluir(order, "ESQUEMA_INVALIDO", "; ".join(errores_esquema)[:300])
+                continue
         except DataError as exc:
             excluir(order, "DATOS_INCOMPLETOS", str(exc))
             continue

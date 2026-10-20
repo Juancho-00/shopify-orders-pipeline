@@ -58,6 +58,7 @@ DESCRIPCIONES: dict[str, str] = {
     "YA_REPORTADO": "Excluido: el pedido ya salió en el reporte de una corrida anterior",
     "CAMBIO_POST_REPORTE": "Excluido: ya se reportó, pero su total cambió después (revisar en Siesa)",
     "DATOS_INCOMPLETOS": "Excluido: al pedido le faltan campos necesarios (¿extracción con --fields?)",
+    "ESQUEMA_INVALIDO": "Excluido: una fila no cumple el esquema (tipo o regla); el pedido no va incompleto",
     "ERROR_TRANSFORMACION": "Excluido: error inesperado al transformar el pedido (ver bitácora)",
 }
 

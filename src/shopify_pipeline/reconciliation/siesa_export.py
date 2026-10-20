@@ -15,6 +15,7 @@ POR QUÉ ES TOLERANTE
 
 from __future__ import annotations
 
+import codecs
 import csv
 import re
 import unicodedata
@@ -75,20 +76,35 @@ def _filas_xlsx(path: Path) -> Iterator[Sequence[Any]]:
         wb.close()
 
 
-def _filas_csv(path: Path) -> Iterator[Sequence[Any]]:
-    for encoding in ("utf-8-sig", "cp1252"):
+def _codificacion(path: Path) -> str:
+    """UTF-8 (con o sin BOM) o, si no decodifica, cp1252 (Excel en español)."""
+    # Decodificador incremental: valida por bloques de 1 MB sin cargar el archivo, y un
+    # carácter partido entre dos bloques no cuenta como error.
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    with path.open("rb") as fh:
         try:
-            texto = path.read_text(encoding=encoding)
-            break
+            for bloque in iter(lambda: fh.read(1 << 20), b""):
+                decoder.decode(bloque)
+            decoder.decode(b"", final=True)
         except UnicodeDecodeError:
-            continue
-    else:  # pragma: no cover - cp1252 decodifica casi todo
-        raise DataError(f"No se pudo leer {path.name}: codificación desconocida.")
-    try:
-        dialecto = csv.Sniffer().sniff(texto[:4096], delimiters=",;\t|")
-    except csv.Error:
-        dialecto = csv.excel
-    yield from csv.reader(texto.splitlines(), dialecto)
+            return "cp1252"
+    return "utf-8-sig"
+
+
+def _filas_csv(path: Path) -> Iterator[Sequence[Any]]:
+    """
+    Lee el CSV fila por fila (memoria constante). Antes se cargaba el archivo completo y se
+    partía en líneas: dos copias en memoria del exporte, que es el archivo más grande.
+    """
+    encoding = _codificacion(path)
+    with path.open(encoding=encoding, newline="") as fh:
+        muestra = fh.read(4096)
+        fh.seek(0)
+        try:
+            dialecto = csv.Sniffer().sniff(muestra, delimiters=",;\t|")
+        except csv.Error:
+            dialecto = csv.excel
+        yield from csv.reader(fh, dialecto)
 
 
 @dataclass(frozen=True)

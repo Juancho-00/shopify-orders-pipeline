@@ -28,6 +28,7 @@ from typing import Any
 
 from shopify_pipeline.exceptions import ConfigError, DataError
 from shopify_pipeline.extract import MANIFEST_SCHEMA_VERSION
+from shopify_pipeline.logs import metricas_etapa, set_run_id
 from shopify_pipeline.sinks.tabular import write_csv, write_xlsx
 from shopify_pipeline.state import Ledger
 from shopify_pipeline.transform.alertas import EVENT_COLUMNS
@@ -140,6 +141,23 @@ def run_transform(
     ``sufijo`` se agrega al nombre de los archivos (p. ej. ``_revision``) para que un
     reporte de revisión no reemplace al reporte oficial de la corrida.
     """
+    set_run_id(raw_file.stem)
+    with metricas_etapa("transform") as metricas:
+        run = _run_transform(raw_file, output_dir, options, log_dir, ledger, sufijo)
+        r = run.result
+        metricas.ok, metricas.corruptas = r.pedidos_procesados, r.errores
+        metricas.extra.update(lineas=len(r.rows), excluidos=sum(r.pedidos_excluidos.values()) - r.errores)
+    return run
+
+
+def _run_transform(
+    raw_file: Path,
+    output_dir: Path,
+    options: SiesaLinesOptions | None,
+    log_dir: Path,
+    ledger: Ledger | None,
+    sufijo: str,
+) -> TransformRun:
     manifest = read_manifest(raw_file)
     run_id = raw_file.stem
     result = transform_orders(read_jsonl(raw_file), options, ledger=ledger, run_id=run_id)
@@ -167,7 +185,8 @@ def run_transform(
     logger.info("Pedidos excluidos: %s.", _resumen(Counter(result.pedidos_excluidos)))
     if result.errores:
         logger.error(
-            "%d pedidos no se pudieron transformar (ERROR_TRANSFORMACION / DATOS_INCOMPLETOS). Detalle en %s",
+            "%d pedidos no se pudieron procesar (ERROR_TRANSFORMACION / DATOS_INCOMPLETOS / "
+            "ESQUEMA_INVALIDO). Detalle en %s",
             result.errores,
             alertas_file,
         )

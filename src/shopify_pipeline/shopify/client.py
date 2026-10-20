@@ -92,6 +92,10 @@ class ShopifyClient:
         ``sleep`` que no duerme) para correr en milisegundos.
         """
         self.config = config
+        # ``extensions.cost`` de la última consulta GraphQL exitosa (requestedQueryCost,
+        # actualQueryCost, throttleStatus). La extracción lo usa para ajustar el tamaño de
+        # página y para registrar el costo de cada lote.
+        self.ultimo_costo: dict[str, Any] = {}
         self.token_provider = token_provider or build_token_provider(config)
         self.base_url = f"https://{config.shop_domain}/admin/api/{config.api_version}"
         self._sleep = sleep
@@ -226,6 +230,7 @@ class ShopifyClient:
             if "INTERNAL_SERVER_ERROR" in codigos:
                 raise ShopifyRetryableError(f"GraphQL: error interno de Shopify ({texto})")
             raise ShopifyClientError(f"GraphQL: {texto}")
+        self.ultimo_costo = (cuerpo.get("extensions") or {}).get("cost") or {}
         self._frenar_por_costo(cuerpo)
         return resp
 

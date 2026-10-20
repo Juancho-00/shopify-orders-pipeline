@@ -333,7 +333,7 @@ Registro breve de decisiones de diseño y su motivo.
 - **Diseño:** `a_formato_rest` convierte cada pedido de GraphQL al diccionario que entregaba
   REST. La transformación, el ledger, las plantillas y el formato del JSONL no cambian. Una
   prueba verifica que el pedido #1006 da exactamente las mismas filas por las dos APIs.
-- **Costo:** 3 pedidos por página (~780 de 1.000 puntos); si Shopify responde
+- **Costo:** 3 pedidos por página (~780 de 1.000 puntos; reemplazado por la 035); si Shopify responde
   `MAX_COST_EXCEEDED`, la página se achica a la mitad. `THROTTLED` se reintenta tras esperar
   los puntos que faltan; con menos del 20 % de puntos disponibles se hace una pausa preventiva.
 - **Riesgo:** no se ha probado contra la tienda real (sin credenciales). Los nombres de campos
@@ -351,3 +351,66 @@ Registro breve de decisiones de diseño y su motivo.
 - **Pendiente para quien siga:** preguntar a Siesa si el reporte se puede programar por correo
   (el pipeline lo leería de Gmail); si no, evaluar Power Automate Desktop. Detalle en
   `ejecucion_programada.md`, *Mejoras para quien siga*.
+
+## 035 · Consulta GraphQL con conexiones pequeñas y página adaptativa (2026-10-20)
+
+- **Decisión:** la consulta pide 5 líneas, 2 grupos de bodega y 5 líneas por grupo; lo que
+  desborde se trae con consultas aparte (`MasLineas`, `MasBodegas`, `MasLineasBodega`). El
+  tamaño de página empieza en 8 y se ajusta con el `requestedQueryCost` de la página
+  anterior (objetivo 900 de los 1.000 puntos permitidos).
+- **Motivo:** el costo solicitado multiplica los `first:` anidados. Con 20 líneas, 3 grupos
+  y 20 líneas por grupo cabían 3 pedidos por página (100 peticiones para 300 pedidos).
+  Antes, un pedido con más grupos o líneas de bodega de las pedidas salía con `SIN_BODEGA`;
+  ahora se completa.
+- **Consecuencia:** menos peticiones y menos latencia, pero el ritmo sostenido lo fija el
+  costo *real* (~40 puntos por pedido contra ~100 puntos/s de recuperación en planes
+  estándar). El manifiesto (`lotes_api`, `costo_real_api`) y la bitácora en DEBUG dejan los
+  datos reales para confirmarlo. Si el volumen creciera mucho, la siguiente palanca es
+  Bulk Operations (`bulkOperationRunQuery`), que no consume el balde por consulta.
+
+## 036 · Pedidos con payload inesperado: se descartan sin detener la extracción (2026-10-20)
+
+- **Decisión:** si un pedido de GraphQL no se puede convertir (`KeyError`, `TypeError`...),
+  se descarta ese pedido y se anota en `<run_id>.rechazados.json` (pedido, gid y error; sin
+  datos del cliente). El manifiesto cuenta `rechazados`.
+- **Motivo:** un nodo malformado tumbaba toda la extracción (código 5).
+- **Consecuencia:** como lo extraído no cuadra con el conteo, `reconciled` es falso, el
+  watermark no avanza y la próxima corrida lo reintenta. Los errores de red o de Shopify
+  NO se capturan aquí: el cliente HTTP los reintenta y, si persisten, detienen la corrida.
+  El JSONL crudo (escrito por el pipeline) sigue sin tolerar líneas corruptas: saltarlas
+  haría que ese pedido nunca se reporte.
+
+## 037 · Excel en modo streaming, salvo las plantillas de Siesa (2026-10-20)
+
+- **Decisión:** el reporte de la fase 1 y la conciliación se escriben con
+  `Workbook(write_only=True)`. Las plantillas de carga a Siesa siguen en modo normal (en una
+  sola pasada). El exporte CSV de Siesa se lee fila por fila.
+- **Motivo:** medido con 3.000 pedidos (6.000 filas): el Excel del reporte pasó de ~81 MB a
+  ~0,5 MB de pico, con el mismo contenido y casi el mismo tiempo. El modo streaming no
+  escribe la etiqueta `<dimension>`: Excel no la necesita, pero el importador de Siesa no se
+  puede probar aquí, así que no se arriesga el archivo que se carga al ERP. Se verificó que
+  las plantillas salen idénticas a las anteriores celda por celda.
+- **Consecuencia:** el conteo de filas del aviso por correo ya no confía en la dimensión
+  declarada del archivo: cuenta recorriendo las filas.
+
+## 038 · Validación de esquema por pedido antes de escribir (2026-10-20)
+
+- **Decisión:** `transform/esquema.py` valida tipos y reglas estructurales de cada fila
+  (llaves no vacías, enteros positivos, montos `Decimal` ≥ 0, `valor_total_linea =
+  precio_neto × cantidad`, `tasa_iva` entre 0 y 1). Si una fila falla, el pedido completo
+  queda como `ESQUEMA_INVALIDO`.
+- **Motivo:** nada impedía que un tipo inesperado (un `float`, un `None`, un monto negativo
+  por un descuento mayor al precio) llegara al reporte y a la carga.
+- **Consecuencia:** los datos de negocio que pueden faltar (SKU, cédula) NO se exigen aquí:
+  siguen como alertas y la fase 3 decide (R-34). Con `--strict`, un `ESQUEMA_INVALIDO`
+  devuelve código 4.
+
+## 039 · run_id en cada línea de log y una línea de métricas por etapa (2026-10-20)
+
+- **Decisión:** el formato de la bitácora incluye `run=<run_id>`, y cada etapa (extract,
+  transform, plantillas, conciliar) deja una línea `etapa=... estado=... ok=N corruptas=M
+  seg=S` en `shopify_pipeline.metricas`.
+- **Motivo:** el archivo diario mezclaba corridas, y los conteos y tiempos estaban repartidos
+  en mensajes distintos por etapa.
+- **Consecuencia:** cambia el formato de la línea de log (se agrega `run=`). Quien filtre la
+  bitácora por posición de columnas debe ajustarlo.

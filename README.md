@@ -233,6 +233,12 @@ data/logs/alertas_20261013T161500Z.csv                      # alertas y pedidos 
 data/logs/shopify_pipeline_20261013.log                     # bitácora de todas las ejecuciones del día
 ```
 
+Solo si Shopify entregó algún pedido con una estructura inesperada:
+
+```
+data/raw/shopify/orders/20261013T161500Z.rechazados.json    # qué pedidos se descartaron y por qué (sin datos del cliente)
+```
+
 Y mantiene el estado entre corridas (no se borra; ver *Corridas incrementales*):
 
 ```
@@ -266,6 +272,10 @@ Manifiesto de la corrida:
   "pipeline_version": "0.1.0",
   "schema_version": 2,
   "recount_count": null,
+  "api": "graphql",
+  "rechazados": 0,
+  "lotes_api": 17,
+  "costo_real_api": 5120.0,
   "reconciled": true
 }
 ```
@@ -311,6 +321,11 @@ Reglas clave:
   (revisar a mano en Siesa).
 - **Un pedido malo no detiene el lote:** si un pedido trae un dato que no se puede procesar,
   queda como `ERROR_TRANSFORMACION` en el log y los demás siguen.
+- **Esquema antes de escribir:** cada fila se valida (tipos, llaves no vacías, montos
+  `Decimal` ≥ 0, `valor_total_linea = precio_neto × cantidad`...). Si una fila falla, el
+  pedido **completo** queda como `ESQUEMA_INVALIDO`: nunca se carga un pedido a medias.
+  Los datos de negocio que pueden faltar (SKU, cédula) siguen siendo alertas (ver
+  [`transform/esquema.py`](src/shopify_pipeline/transform/esquema.py)).
 
 ### Log de alertas
 
@@ -324,6 +339,7 @@ con una fila por evento, sin datos personales del cliente:
 | EXCLUIDO | PAGO_NO_CONFIRMADO | #1012 | | estado_pago=pending |
 | EXCLUIDO | YA_REPORTADO | #1006 | | run=20261013T161500Z |
 | EXCLUIDO | ERROR_TRANSFORMACION | #1013 | | ValueError: Monto inválido: 'abc' |
+| EXCLUIDO | ESQUEMA_INVALIDO | #1014 | | línea 1: precio_neto: Decimal ≥ 0 (tipo Decimal) |
 
 Revisa este archivo antes de cargar a Siesa. La lista completa de códigos está en
 [`docs/mapeo_siesa.md`](docs/mapeo_siesa.md#log-de-alertas).
@@ -384,7 +400,7 @@ Requisitos, revisión diaria y qué hacer con cada resultado en
 | `1` | Error transitorio (red, 5xx, 429) tras agotar reintentos, o archivo bloqueado (abierto en Excel, sincronizando en Drive) | Reintentar más tarde |
 | `2` | Configuración o argumentos (401, 403, 404, `.env` incompleto, ventana inválida) | Corregir configuración; reintentar no sirve |
 | `3` | Extracción completa, pero el conteo no cuadra ni tras un segundo conteo (`--strict`) | Revisar antes de conciliar |
-| `4` | Error de datos: JSONL o estado dañado, extracción con campos insuficientes o, con `--strict`, pedidos que no se pudieron transformar | Revisar el log de alertas y la bitácora |
+| `4` | Error de datos: JSONL o estado dañado, extracción con campos insuficientes o, con `--strict`, pedidos que no se pudieron procesar (`ERROR_TRANSFORMACION`, `DATOS_INCOMPLETOS`, `ESQUEMA_INVALIDO`) | Revisar el log de alertas y la bitácora |
 | `5` | Error inesperado (posible bug); la traza completa queda en la bitácora | Reportar; reintentar no sirve |
 
 ### Cómo funciona
@@ -418,7 +434,45 @@ Requisitos, revisión diaria y qué hacer con cada resultado en
   temporal y se renombra al final; si algo falla, no queda un archivo a medias.
 - **Aislamiento por pedido:** un pedido con datos inesperados se excluye con
   `ERROR_TRANSFORMACION` y la corrida continúa. Un 404 al consultar la bodega de un pedido
-  tampoco detiene la extracción.
+  tampoco detiene la extracción. Con GraphQL, un pedido cuya estructura no se puede
+  convertir se descarta y queda en `<run_id>.rechazados.json`; como lo extraído ya no cuadra
+  con el conteo, el watermark no avanza y la próxima corrida lo reintenta.
+- **Costo GraphQL:** Shopify cobra por campos pedidos con dos límites. El costo *solicitado*
+  (lo calcula antes multiplicando los `first:` anidados) no puede pasar de 1.000 por
+  consulta; por eso las conexiones anidadas piden pocos elementos (5 líneas, 2 grupos de
+  bodega, 5 líneas por grupo) y lo que desborde se trae aparte. El tamaño de página se
+  ajusta solo con el costo que reporta Shopify (objetivo: 900 puntos). El costo *real*
+  (~40 puntos por pedido) es lo que se descuenta del balde, que se recupera a ~100 puntos/s
+  en planes estándar: eso fija el ritmo máximo sostenido (~2,5 pedidos/s), y el cliente
+  frena antes de agotarlo. Los lotes y el costo real quedan en el manifiesto y en la bitácora.
+- **Memoria:** la extracción y la transformación leen y escriben pedido por pedido. El Excel
+  del reporte y de la conciliación se escribe en modo *streaming* de openpyxl (con 6.000
+  filas, ~0,5 MB en vez de ~68 MB). Las plantillas de Siesa usan el modo normal a propósito:
+  el modo streaming no escribe la dimensión de la hoja y el importador de Siesa no se puede
+  probar aquí. El exporte CSV de Siesa se lee fila por fila.
+
+### Bitácora y métricas
+
+Cada línea de `data/logs/shopify_pipeline_AAAAMMDD.log` lleva el `run_id` de la corrida
+(`run=-` antes de que exista), así se separan las corridas de un mismo día. Cada etapa deja
+**una** línea de métricas en formato `clave=valor`:
+
+```
+2026-10-20 06:31:12 INFO run=20261020T113000Z shopify_pipeline.metricas | etapa=extract estado=ok ok=212 corruptas=0 seg=38.41 esperados=212 cuadra=True api=graphql lotes=17 costo_real=8480.00
+2026-10-20 06:31:14 INFO run=20261020T113000Z shopify_pipeline.metricas | etapa=transform estado=ok ok=180 corruptas=1 seg=0.92 lineas=371 excluidos=31
+2026-10-20 06:31:15 INFO run=20261020T113000Z shopify_pipeline.metricas | etapa=plantillas estado=ok ok=176 corruptas=4 seg=0.66 clientes=170 vending=0
+```
+
+`ok` = registros procesados con éxito, `corruptas` = descartados por datos inesperados o
+inválidos, `seg` = duración de la etapa. Si una etapa falla, su línea sale en nivel `ERROR`
+con `estado=error`. Para ver solo las métricas:
+
+```powershell
+Select-String -Path data\logs\shopify_pipeline_*.log -Pattern "shopify_pipeline.metricas"
+```
+
+Con `--log-level DEBUG`, la extracción registra además cada lote de GraphQL (pedidos,
+`first`, costo solicitado y real, puntos disponibles y segundos).
 
 > **API de Shopify: GraphQL (por defecto) con REST de respaldo.** La REST Admin API es
 > *legacy* desde octubre de 2024, así que el pipeline lee los pedidos con la GraphQL Admin
