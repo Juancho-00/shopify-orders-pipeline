@@ -61,7 +61,7 @@ shopify-orders-pipeline/
 │       ├── pedidos.py       # Plantilla de pedidos: encabezado y detalle, tipo de documento, consecutivo
 │       └── run.py           # Reporte de la fase 1 → terceros_<run>.xlsx + pedidos_<run>.xlsx
 ├── scripts/
-│   ├── ejecutar_pipeline.ps1 # Corrida diaria (la usa la tarea programada)
+│   ├── ejecutar_pipeline.ps1 # Corrida diaria: extracción + plantillas (la usa la tarea programada)
 │   └── registrar_tarea.ps1   # Crea la tarea en el Programador de tareas de Windows
 ├── tests/                   # Pruebas sin red (Shopify simulado con `responses`)
 │   └── fixtures/            # Respuestas de ejemplo de Shopify (anonimizadas)
@@ -361,8 +361,15 @@ En el equipo que ejecutará el pipeline (uno solo), con el Programador de tareas
 .\scripts\registrar_tarea.ps1 -Python "<ruta al python.exe del entorno>" -Hora "06:30"
 ```
 
-La tarea corre `extract --incremental --strict`, espera a que Google Drive monte la unidad,
-reintenta una vez si hay un error temporal y deja el historial en `data\logs\ejecuciones.csv`.
+La tarea (`Shopify Pipeline - Corrida diaria`) hace todo lo automático:
+
+1. `extract --incremental --strict`: pedidos de Shopify → reporte de la fase 1.
+2. `plantillas --strict` sobre el reporte de esa corrida: deja en `data\siesa\cargas\` la
+   plantilla de clientes y la de pedidos.
+
+La persona encargada solo **valida y sube** las plantillas (primero clientes, luego pedidos)
+y después concilia. La tarea espera a que Google Drive monte la unidad, reintenta una vez
+cada paso ante un error temporal y deja el historial en `data\logs\ejecuciones.csv`.
 Requisitos, revisión diaria y qué hacer con cada resultado en
 [`docs/ejecucion_programada.md`](docs/ejecucion_programada.md).
 

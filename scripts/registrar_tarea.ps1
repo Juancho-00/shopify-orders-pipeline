@@ -31,7 +31,7 @@ param(
     [ValidatePattern("^\d{2}:\d{2}$")]
     [string]$Hora = "06:30",
 
-    [string]$NombreTarea = "Shopify Pipeline - Extraccion diaria",
+    [string]$NombreTarea = "Shopify Pipeline - Corrida diaria",
 
     [string]$RepoDir = (Split-Path -Parent $PSScriptRoot)
 )
@@ -58,7 +58,7 @@ $usuario = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.Window
     -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $NombreTarea -Action $accion -Trigger $disparador -Settings $ajustes `
-    -Principal $usuario -Description "Extrae pedidos de Shopify y genera el reporte para Siesa. Repo: $RepoDir" `
+    -Principal $usuario -Description "Extrae los pedidos de Shopify y deja listas las plantillas de Siesa para validar y subir. Repo: $RepoDir" `
     -Force | Out-Null
 
 Write-Output "Tarea '$NombreTarea' registrada: todos los días a las $Hora (usuario actual, con sesión iniciada)."

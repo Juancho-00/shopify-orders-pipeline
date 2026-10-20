@@ -299,3 +299,14 @@ Registro breve de decisiones de diseño y su motivo.
   distintos. Se deja la validación `PEDIDO_BODEGAS_MIXTAS` solo como control.
 - **Notas:** `_notas` se corta a 500 caracteres, el límite de Siesa, con la alerta
   `NOTAS_RECORTADAS`.
+
+## 031 · La corrida diaria también genera las plantillas (2026-10-20)
+
+- **Decisión:** `scripts/ejecutar_pipeline.ps1` corre dos pasos: `extract --incremental
+  --strict` y, si dejó un reporte nuevo en esa corrida, `plantillas --input <reporte> --strict`.
+  La persona encargada solo valida y sube las plantillas. La tarea pasa a llamarse
+  `Shopify Pipeline - Corrida diaria`.
+- **Por qué solo con reporte nuevo:** si la extracción falla, el reporte más reciente es el
+  del día anterior; regenerar sus plantillas invitaría a subirlas dos veces.
+- **Código de salida:** el de la extracción si falló; si no, el de las plantillas (4 = hay
+  pedidos que no se pueden cargar). `ejecuciones.csv` registra el resultado de cada paso.
