@@ -1,4 +1,4 @@
-"""Fase 3: generación de la plantilla de terceros desde un reporte sintético."""
+"""Fase 3: generación de las plantillas de clientes y pedidos desde un reporte sintético."""
 
 from __future__ import annotations
 
@@ -15,12 +15,14 @@ from shopify_pipeline.exceptions import ConfigError
 
 COLUMNAS = ["documento_referencia", "pedido_shopify", "fecha_compra", "tipo_documento", "numero_documento",
             "primer_nombre", "segundo_nombre", "primer_apellido", "segundo_apellido", "direccion",
-            "direccion_complemento", "codigo_ciudad_siesa", "telefono", "email", "referencia"]  # fmt: skip
+            "direccion_complemento", "codigo_ciudad_siesa", "telefono", "email", "referencia",
+            "tipo_linea", "bodega_siesa", "cantidad", "precio_neto", "notas"]  # fmt: skip
 
 
 def _fila(ref, doc, fecha, **cambios):
     valores = [ref, f"#{ref}", fecha, "C", doc, "Ana", "", "Pérez", "Gómez", "Calle 1 # 2-3", "",
-               "16905001", "3001112233", "ana@example.com", "SKU1"]  # fmt: skip
+               "16905001", "3001112233", "ana@example.com", "SKU1", "PRODUCTO", "LCD01", "1", "89999",
+               ""]  # fmt: skip
     base = dict(zip(COLUMNAS, valores, strict=True))
     return base | cambios
 
@@ -40,7 +42,14 @@ def reporte(tmp_path):
         tmp_path / "processed" / "pedidos_siesa_20261019T113000Z.csv",
         [
             _fila("1006", "1017000001", "2026-10-18 10:00:00"),
-            _fila("1006", "1017000001", "2026-10-18 10:00:00", referencia="SERV01"),  # 2ª línea
+            _fila(
+                "1006",
+                "1017000001",
+                "2026-10-18 10:00:00",
+                referencia="SERV01",
+                tipo_linea="ENVIO",
+                precio_neto="12294",
+            ),  # 2ª línea: envío
             _fila("1007", "1017000001", "2026-10-18 15:00:00", direccion="Carrera 9 # 8-7"),  # mismo cliente
             _fila("1008", "70123456", "2026-10-18 16:00:00", codigo_ciudad_siesa=""),  # sin ciudad
         ],
@@ -77,7 +86,7 @@ def test_libro_tiene_las_4_hojas_de_la_plantilla(tmp_path):
 
     clientes = [[c.value for c in fila] for fila in wb["Clientes"].iter_rows(min_row=2)]
     assert [f[0] for f in clientes] == [1017000001, 70123456]
-    assert clientes[0][1:8] == ["001", "ANA PÉREZ GÓMEZ", "W001", "03D", "C001", "1", "500"]
+    assert clientes[0][1:8] == ["001", "PÉREZ GÓMEZ ANA", "W001", "03D", "C001", "1", "500"]
     assert clientes[0][17:19] == ["20261019", "W001"]
 
     impuestos = [[c.value for c in fila] for fila in wb["Imptos y Reten"].iter_rows(min_row=2)]
@@ -117,3 +126,100 @@ def test_cli_plantillas(reporte, tmp_path):
     assert cli.main(base) == cli.EXIT_OK
     assert cli.main([*base, "--strict"]) == cli.EXIT_DATA  # el 1008 no se pudo cargar
     assert (tmp_path / "cargas" / "terceros_20261019T113000Z.xlsx").exists()
+
+
+def test_plantilla_de_pedidos(tmp_path):
+    reporte = _reporte(
+        tmp_path / "pedidos_siesa_20261020T113000Z.csv",
+        [
+            _fila("2001", "70123456", "2026-10-19 09:00:00", bodega_siesa="LEC04"),  # Melonn → CPM
+            _fila("2002", "1017000001", "2026-10-19 10:00:00", bodega_siesa="LCM07", notas="Portería"),  # CPT
+            _fila("2003", "1017000002", "2026-10-19 11:00:00", cantidad="2", precio_neto="84999"),  # CPW
+            _fila(
+                "2003",
+                "1017000002",
+                "2026-10-19 11:00:00",
+                referencia="SERV01",
+                tipo_linea="ENVIO",
+                precio_neto="12294",
+            ),
+            _fila("2004", "1017000003", "2026-10-19 12:00:00"),  # CPW, segundo del bloque
+        ],
+    )
+    run = generar_plantillas(reporte, tmp_path / "cargas", tmp_path / "logs", date(2026, 10, 20))
+    assert run.pedidos_file.name == "pedidos_20261020T113000Z.xlsx" and run.pedidos == 4
+    wb = load_workbook(run.pedidos_file)
+    assert wb.sheetnames == ["Pedidos", "Movto Pedidos comercial"]
+
+    encabezados = [[c.value for c in f] for f in wb["Pedidos"].iter_rows(min_row=2)]
+    # Por bloques CPW → CPT → CPM; el consecutivo se reinicia en cada bloque.
+    assert [(f[1], f[2], f[11]) for f in encabezados] == [
+        ("CPW", 1, "2003"),
+        ("CPW", 2, "2004"),
+        ("CPT", 1, "2002"),
+        ("CPM", 1, "2001"),
+    ]
+    cpt = encabezados[2]
+    assert cpt == ["001", "CPT", 1, "20261020", "4", 1017000001, "001", 1017000001, "001", "001",
+                   "20261020", "2002", "03D", "Portería", "000", "900733097"]  # fmt: skip
+
+    movtos = [[c.value for c in f] for f in wb["Movto Pedidos comercial"].iter_rows(min_row=2)]
+    assert [(f[1], f[2], f[3], f[4], f[7], f[15], f[16]) for f in movtos[:2]] == [
+        ("CPW", "1", 1, "SKU1", "LCD01", "2", "84999"),
+        ("CPW", "1", 2, "SERV01", "LCD01", "1", "12294"),  # el envío es una línea más
+    ]
+    assert movtos[0][8:15] == ["06", "0", "001", None, "20261020", "03", "UND"]
+    assert movtos[0][17:] == ["0", "2"]
+    assert len(movtos) == 5
+
+
+@pytest.mark.parametrize(
+    ("cambios", "codigo"),
+    [
+        ({"referencia": ""}, "PEDIDO_INCOMPLETO"),
+        ({"bodega_siesa": ""}, "PEDIDO_INCOMPLETO"),
+        ({"bodega_siesa": "LCM54"}, "BODEGA_NO_SE_CARGA"),  # vending: no va a Siesa
+        ({"bodega_siesa": "LXX99"}, "TIPO_DOCTO_SIN_EQUIVALENCIA"),  # bodega sin tipo configurado
+        ({"email": ""}, "TERCERO_INCOMPLETO"),
+    ],
+)
+def test_pedido_no_cargable_no_va_en_ninguna_plantilla(tmp_path, cambios, codigo):
+    reporte = _reporte(tmp_path / "pedidos_siesa_20261020T113000Z.csv",
+                       [_fila("3001", "70123456", "2026-10-19 09:00:00", **cambios)])  # fmt: skip
+    run = generar_plantillas(reporte, tmp_path / "cargas", tmp_path / "logs", date(2026, 10, 20))
+    assert (run.terceros, run.pedidos) == (0, 0)  # ni el cliente ni el pedido se cargan
+    assert [e.codigo for e in run.eventos] == [codigo]
+
+
+def test_pedido_con_bodegas_de_tipos_distintos(tmp_path):
+    reporte = _reporte(
+        tmp_path / "pedidos_siesa_20261020T113000Z.csv",
+        [
+            _fila("3002", "70123456", "2026-10-19 09:00:00", bodega_siesa="LCD01"),
+            _fila("3002", "70123456", "2026-10-19 09:00:00", referencia="SKU2", bodega_siesa="LEC04"),
+        ],
+    )
+    run = generar_plantillas(reporte, tmp_path / "cargas", tmp_path / "logs", date(2026, 10, 20))
+    (evento,) = run.eventos
+    assert (evento.codigo, evento.detalle) == ("PEDIDO_BODEGAS_MIXTAS", "LCD01=CPW / LEC04=CPM")
+
+
+def test_vending_no_cuenta_como_error(tmp_path):
+    reporte = _reporte(tmp_path / "pedidos_siesa_20261020T113000Z.csv",
+                       [_fila("3003", "70123456", "2026-10-19 09:00:00", bodega_siesa="LCM55")])  # fmt: skip
+    run = generar_plantillas(reporte, tmp_path / "cargas", tmp_path / "logs", date(2026, 10, 20))
+    assert (run.pedidos, run.vending, run.no_cargados) == (0, 1, 0)
+    args = ["--log-dir", str(tmp_path / "logs"), "plantillas", "--input", str(reporte),
+            "--output-dir", str(tmp_path / "cargas"), "--strict"]  # fmt: skip
+    assert cli.main(args) == cli.EXIT_OK  # --strict no falla por un pedido de vending
+
+
+def test_notas_se_cortan_en_500_caracteres(tmp_path):
+    reporte = _reporte(tmp_path / "pedidos_siesa_20261020T113000Z.csv",
+                       [_fila("3004", "70123456", "2026-10-19 09:00:00", notas="x" * 620)])  # fmt: skip
+    run = generar_plantillas(reporte, tmp_path / "cargas", tmp_path / "logs", date(2026, 10, 20))
+    notas = load_workbook(run.pedidos_file)["Pedidos"].cell(row=2, column=14).value
+    assert len(notas) == 500
+    assert [(e.codigo, e.detalle) for e in run.eventos] == [
+        ("NOTAS_RECORTADAS", "620 caracteres; Siesa admite 500")
+    ]

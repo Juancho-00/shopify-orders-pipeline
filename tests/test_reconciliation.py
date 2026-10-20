@@ -11,7 +11,13 @@ from openpyxl import Workbook
 
 from shopify_pipeline import cli
 from shopify_pipeline.exceptions import ConfigError, DataError
-from shopify_pipeline.reconciliation.run import EN_SIESA, FALTA_EN_SIESA, conciliar, pedidos_reportados
+from shopify_pipeline.reconciliation.run import (
+    EN_SIESA,
+    FALTA_EN_SIESA,
+    NO_SE_CARGA,
+    conciliar,
+    pedidos_reportados,
+)
 from shopify_pipeline.reconciliation.siesa_export import (
     leer_exporte,
     normalizar_referencia,
@@ -172,3 +178,23 @@ def test_cli_conciliar_sin_exportes(tmp_path):
     vacia.mkdir()
     args = ["--log-dir", str(tmp_path / "logs"), "conciliar", "--exportes-dir", str(vacia)]
     assert cli.main(args) == cli.EXIT_CONFIG
+
+
+def test_pedidos_de_vending_no_se_buscan_en_siesa(tmp_path):
+    carpeta = tmp_path / "processed"
+    carpeta.mkdir()
+    with (carpeta / "pedidos_siesa_20261020T113000Z.csv").open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(
+            ["documento_referencia", "pedido_shopify", "fecha_compra", "bodega_siesa", "valor_total_linea"]
+        )
+        w.writerow(["5001", "#5001", "2026-10-19 09:00:00", "LCM55", "50000"])  # vending
+        w.writerow(["5002", "#5002", "2026-10-19 10:00:00", "LCD01", "60000"])
+    exporte = tmp_path / "siesa.xlsx"
+    _exporte_xlsx(exporte, [["CPW-00000001", 5002]])
+    resultado = conciliar(exporte, carpeta, tmp_path / "out", ahora=AHORA)
+    assert [(f["documento_referencia"], f["estado"]) for f in resultado.filas] == [
+        ("5002", EN_SIESA),
+        ("5001", NO_SE_CARGA),
+    ]
+    assert resultado.faltantes == 0

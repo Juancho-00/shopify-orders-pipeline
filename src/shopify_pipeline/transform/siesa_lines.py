@@ -10,6 +10,7 @@ Reglas principales (detalle en ``docs/mapeo_siesa.md``):
 * Cliente: se toma de ``billing_address``; si falta, de ``shipping_address``; si falta,
   del cliente (``customer``).
 * Cédula/NIT: viene en ``billing_address.company`` (respaldo: ``shipping_address.company``).
+  Si es NIT, ese mismo campo trae el nombre de la empresa (columna ``razon_social``).
 * Envío: si el valor cobrado es mayor a cero, se agrega una línea con la referencia
   configurada (por defecto ``SERV01``, R-08), con IVA incluido (R-07) y la misma bodega
   de los productos.
@@ -44,6 +45,7 @@ from shopify_pipeline.transform.normalize import (
     clean_text,
     normalize_phone,
     parse_documento,
+    separar_company,
     split_apellidos,
     split_nombres,
     to_bogota,
@@ -106,6 +108,7 @@ COLUMNS: tuple[str, ...] = (
     "segundo_nombre",
     "primer_apellido",
     "segundo_apellido",
+    "razon_social",
     "direccion",
     "direccion_complemento",
     "ciudad",
@@ -264,8 +267,17 @@ def _cliente(order: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     if not primer_apellido:
         alertas.append("SIN_APELLIDO")
 
-    doc = parse_documento(_first(billing.get("company"), shipping.get("company"), default.get("company")))
+    # ``company`` trae el documento y, si es empresa, también su nombre (razón social).
+    texto_doc, empresa = separar_company(
+        _first(billing.get("company"), shipping.get("company"), default.get("company"))
+    )
+    doc = parse_documento(texto_doc)
     alertas.extend(doc.alertas)
+    razon_social = ""
+    if doc.tipo == "NIT":
+        razon_social = empresa or " ".join(p for p in (first_name, last_name) if p).upper()
+        if not empresa:
+            alertas.append("RAZON_SOCIAL_DESDE_NOMBRE")
     tipo_siesa = TIPO_DOC_SIESA.get(doc.tipo, "")
     if doc.tipo and not tipo_siesa:  # CE o pasaporte: Siesa aún no tiene código definido.
         alertas.append("TIPO_DOCUMENTO_SIN_CODIGO_SIESA")
@@ -304,6 +316,7 @@ def _cliente(order: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         "segundo_nombre": segundo_nombre,
         "primer_apellido": primer_apellido,
         "segundo_apellido": segundo_apellido,
+        "razon_social": razon_social,
         "direccion": direccion,
         "direccion_complemento": complemento,
         "ciudad": ciudad,

@@ -104,6 +104,34 @@ def tipo_por_formato(numero: str) -> tuple[str, str]:
     return "", "TIPO_DOCUMENTO_NO_IDENTIFICADO"
 
 
+# Documento dentro del texto de ``company``: prefijo opcional + número (con puntos/espacios) + DV.
+_DOCUMENTO_EN_TEXTO = re.compile(
+    r"(?:\b(?:NIT|C\.?\s?C\.?|C\.?\s?E\.?|CEDULA|CÉDULA|PASAPORTE|PP)\b[\s:.#\-]*)?"
+    r"\d[\d.\s]*\d(?:\s*-\s*\d)?",
+    re.IGNORECASE,
+)
+
+
+def separar_company(raw: object) -> tuple[str, str]:
+    """
+    Separa el campo ``company`` de Shopify en ``(documento, nombre_empresa)``.
+
+    Para un NIT el cliente escribe el número y el nombre de la empresa en el mismo campo:
+    ``"NIT 900.123.456-7 Comercial Andina S.A.S."`` → ``("NIT 900.123.456-7",
+    "COMERCIAL ANDINA S.A.S.")``. Con solo el número (``"1.017.000.001"``) el nombre sale
+    vacío. Acepta el nombre antes o después del número.
+    """
+    text = clean_text(raw)
+    match = _DOCUMENTO_EN_TEXTO.search(text)
+    if not match:
+        return text, ""
+    nombre = f"{text[: match.start()]} {text[match.end() :]}"
+    nombre = clean_text(re.sub(r"^[\s,;:/|\-]+|[\s,;:/|\-]+$", "", nombre))
+    if not re.search(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]", nombre):
+        nombre = ""
+    return match.group(0).strip(), nombre.upper()
+
+
 def _es_nit_con_dv_pegado(numero: str) -> bool:
     """``9001234567``: NIT de 9 dígitos + su DV, escrito sin guion."""
     return len(numero) == 10 and numero.startswith(PREFIJOS_NIT) and calcular_dv_nit(numero[:9]) == numero[9]

@@ -38,11 +38,11 @@ Las respuestas de R-06 a R-36 las entregó TI el **2026-10-19**.
 | R-22 | Solo se verifica que el pedido exista | 2 | ✅ |
 | R-23 | Sin decimales: valores en pesos enteros | 1 y 2 | ✅ |
 | R-24 | Tolerancia máxima de $50 | 1 | ✅ |
-| R-30 | Dos plantillas Excel: primero clientes, luego pedidos | 3 | 🟡 |
-| R-31 | El cliente se sube siempre con cada pedido | 3 | 🟡 |
-| R-32 | Datos fijos del cliente | 3 | ⏳ (se valida al llenar la plantilla) |
-| R-33 | Datos fijos del pedido = los de la plantilla | 3 | 🟡 |
-| R-34 | Si falta un dato obligatorio, el pedido no se sube | 3 | 🟡 |
+| R-30 | Dos plantillas Excel: primero clientes, luego pedidos | 3 | ✅ |
+| R-31 | El cliente se sube siempre con cada pedido | 3 | ✅ |
+| R-32 | Datos fijos del cliente | 3 | ✅ (falta CE/pasaporte) |
+| R-33 | Datos fijos del pedido = los de la plantilla | 3 | ✅ |
+| R-34 | Si falta un dato obligatorio, el pedido no se sube | 3 | ✅ |
 | R-35 | Siesa impide referencias duplicadas | 3 | ✅ |
 | R-36 | Cambios después de cargado: log y gestión manual | 3 | ✅ |
 
@@ -162,32 +162,32 @@ La estructura de cada columna está en [plantillas_siesa.md](plantillas_siesa.md
 > **Nota:** Siesa está desarrollando la integración oficial con Shopify. Conviene confirmar
 > qué cubrirá y hasta cuándo se usará esta contingencia.
 
-### R-30 · Cómo se cargan los datos a Siesa 🟡
+### R-30 · Cómo se cargan los datos a Siesa ✅
 
 Dos plantillas Excel, en este orden:
 
 1. Clientes (`Terceros`, `Clientes`, `Imptos y Reten`, `Ent. Dinamica Cliente`).
 2. Pedidos (`Pedidos`, `Movto Pedidos comercial`).
 
-### R-31 · Clientes existentes 🟡
+### R-31 · Clientes existentes ✅
 
 El cliente se sube **siempre** con cada pedido, aunque ya exista, porque sus datos
 (dirección, teléfono) pueden haber cambiado.
 
-### R-32 · Datos fijos del cliente ⏳
+### R-32 · Datos fijos del cliente ✅
 
-Se valida cuando se llene la plantilla. Las preguntas abiertas (NIT/razón social, condición
-de pago de contraentrega, fecha de nacimiento, CE/pasaporte) están en
-[plantillas_siesa.md](plantillas_siesa.md#preguntas-abiertas-resolver-con-r-32).
+Definidos por TI el 2026-10-19 y 2026-10-20, columna por columna, en
+[plantillas_siesa.md](plantillas_siesa.md). Quedan abiertos: el código Siesa de cédula de
+extranjería y pasaporte. Los pedidos de las bodegas de vending no se cargan a Siesa.
 
-### R-33 · Datos fijos del pedido 🟡
+### R-33 · Datos fijos del pedido ✅
 
 Los valores fijos son los que trae la plantilla: centro de operación `001`, tipo de documento
 `CPM`, condición de pago `03D`, lista de precios `03`, unidad `UND`, motivo `06`, etc.
 
-### R-34 · Falta un dato obligatorio 🟡
+### R-34 · Falta un dato obligatorio ✅
 
-El pedido **no se sube**. Queda en el log para corregirlo a mano.
+El pedido **no se sube**, ni su cliente. Queda en `data/logs/plantillas_<run_id>.csv` con el motivo, para corregirlo a mano.
 
 ### R-35 · Evitar pedidos duplicados ✅
 

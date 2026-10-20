@@ -43,7 +43,7 @@ def test_cedula(pedido):
         "DE LA TORRE",
         "LAURA SOFÍA",
     )
-    assert f["F015_CONTACTO"] == "LAURA SOFÍA RESTREPO DE LA TORRE"
+    assert f["F015_CONTACTO"] == "RESTREPO DE LA TORRE LAURA SOFÍA"  # APELLIDOS NOMBRES
     assert (f["F015_DIRECCION1"], f["F015_DIRECCION2"], f["F015_DIRECCION3"]) == (
         "Calle 10 # 20-30",
         "",
@@ -54,13 +54,23 @@ def test_cedula(pedido):
     assert f["F200_FECHA_NACIMIENTO"] == "20261019"
 
 
-def test_nit_lleva_razon_social_y_sin_apellidos(pedido):
-    nombre = {"primer_nombre": "Comercial", "segundo_nombre": "Andina", "primer_apellido": "S.A.S."}
-    pedido.update({"tipo_documento": "N", "numero_documento": "900123456", "segundo_apellido": "", **nombre})
+def test_nit_lleva_razon_social_de_company_y_sin_apellidos(pedido):
+    pedido.update({"tipo_documento": "N", "numero_documento": "900123456",
+                   "razon_social": "COMERCIAL ANDINA S.A.S."})  # fmt: skip
     f = fila_tercero(pedido, "20261019").fila
     assert f["F200_ID_TIPO_IDENT"] == "N"
     assert f["F200_RAZON_SOCIAL"] == f["F015_CONTACTO"] == "COMERCIAL ANDINA S.A.S."
     assert (f["F200_APELLIDO1"], f["F200_APELLIDO2"], f["F200_NOMBRES"]) == ("", "", "")
+
+
+@pytest.mark.parametrize(
+    ("campo", "valor"),
+    [("email", ""), ("email", "sin-arroba.com"), ("telefono", ""), ("telefono", "12345")],
+)
+def test_email_y_telefono_obligatorios(pedido, campo, valor):
+    pedido[campo] = valor  # Se necesitan para la facturación electrónica.
+    t = fila_tercero(pedido, "20261019")
+    assert not t.cargable and campo in t.faltantes
 
 
 @pytest.mark.parametrize("campo", ["numero_documento", "tipo_documento", "direccion", "codigo_ciudad_siesa"])

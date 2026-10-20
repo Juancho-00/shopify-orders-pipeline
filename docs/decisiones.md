@@ -262,3 +262,40 @@ Registro breve de decisiones de diseño y su motivo.
   nacimiento como número).
 - **Dirección en `Clientes`:** solo tiene 2 campos; el segundo une los campos 2 y 3 de
   `Terceros` (normalmente, el complemento). Si no cabe en 40 caracteres: `DIRECCION_TRUNCADA`.
+
+## 028 · Razón social desde `company`, orden del nombre y datos obligatorios (2026-10-20)
+
+- **Razón social:** sale del campo `company` (`billing_address`, respaldo `shipping_address`),
+  donde la empresa escribe su NIT y su nombre. El pipeline separa el número del nombre
+  (`separar_company`); el número sigue las reglas de la R-06. Un NIT sin nombre usa el de
+  facturación con la alerta `RAZON_SOCIAL_DESDE_NOMBRE`. El campo `order.company` de Shopify
+  (B2B) no sirve: en la REST API solo trae identificadores, no el nombre.
+- **Nombre completo:** en orden APELLIDOS NOMBRES en `F015_CONTACTO` y
+  `F201_DESCRIPCION_SUCURSAL`. Con NIT, apellidos y nombres van vacíos.
+- **Obligatorios:** email y teléfono se suman a los datos sin los cuales el cliente no se
+  carga (R-34), porque son requeridos para la facturación electrónica.
+- **Dirección en `Clientes`:** confirmado unir los campos 2 y 3 de `Terceros`, máximo 40.
+
+## 029 · Plantilla de pedidos (2026-10-20)
+
+- **Decisión:** columnas definidas por TI (ver `plantillas_siesa.md`). El tipo de documento
+  sale de la bodega de salida (nueva columna `tipo_docto_siesa` en `bodegas_siesa.csv`): CEDI
+  → `CPW`, tiendas → `CPT`, Melonn → `CPM`. El consecutivo empieza en 1 por tipo y los
+  pedidos van por bloques CPW → CPT → CPM. Las fechas son la de la carga. Precio = precio neto.
+- **Un pedido, todo o nada:** si no se puede cargar (cliente incompleto, línea sin SKU o
+  bodega, bodega sin tipo de documento o bodegas de tipos distintos), no va en ninguna de las
+  dos plantillas, para no dejar clientes sin pedido ni pedidos sin cliente.
+- **Resuelto en la 030:** vending no se carga y no hay pedidos con bodegas de tipos distintos.
+- **NIT:** lleva las mismas 3 filas de impuestos que una persona y el DV no va en la plantilla.
+
+## 030 · Vending fuera de Siesa y notas de 500 caracteres (2026-10-20)
+
+- **Vending:** los pedidos de las 4 bodegas de vending no se cargan a Siesa. Se marcan en
+  `bodegas_siesa.csv` con `tipo_docto_siesa = NO_CARGA` (distinto de vacío, que significa
+  "falta configurar"). No entran en las plantillas (`BODEGA_NO_SE_CARGA`, sin contar como
+  error para `--strict`) y en la conciliación salen como `NO_SE_CARGA`, para no reportarlos
+  como faltantes en Siesa. Siguen en el reporte de la fase 1, como registro.
+- **Bodegas mixtas:** TI confirma que no hay pedidos con productos de bodegas de tipos
+  distintos. Se deja la validación `PEDIDO_BODEGAS_MIXTAS` solo como control.
+- **Notas:** `_notas` se corta a 500 caracteres, el límite de Siesa, con la alerta
+  `NOTAS_RECORTADAS`.

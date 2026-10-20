@@ -5,6 +5,7 @@ QUÉ HACE
     Lee las tablas de ``shopify_pipeline/catalogos/`` y responde dos preguntas:
 
     * ``codigo_bodega("D'Luchi PT Guarne")`` → ``"LCD01"``
+    * ``tipo_docto_bodega("LCD01")`` → ``"CPW"`` (tipo de documento del pedido en Siesa)
     * ``codigo_ciudad("Medellin", "Antioquia", "ANT")`` → ``"16905001"``
 
 CÓMO COMPARA LOS TEXTOS
@@ -72,6 +73,31 @@ def _bodegas(_dir_key: str) -> dict[str, str]:
 def codigo_bodega(nombre_shopify: str) -> str:
     """Código de bodega Siesa para una ubicación de Shopify. ``""`` si no hay equivalencia."""
     return _bodegas(str(_dir())).get(normalizar(nombre_shopify), "")
+
+
+@lru_cache(maxsize=4)
+def _tipos_docto(_dir_key: str) -> dict[str, str]:
+    return {
+        f["codigo_siesa"].upper(): f.get("tipo_docto_siesa", "").upper()
+        for f in _leer_csv("bodegas_siesa.csv")
+    }
+
+
+NO_CARGA = "NO_CARGA"  # Bodegas cuyos pedidos no se cargan a Siesa (vending).
+
+
+def tipo_docto_bodega(codigo_siesa: str) -> str:
+    """
+    Tipo de documento del pedido en Siesa según la bodega de salida: ``LCD01`` → ``CPW``,
+    tiendas ``LCM..`` → ``CPT``, Melonn ``LEC..`` → ``CPM``. ``NO_CARGA`` para las bodegas
+    cuyos pedidos no van a Siesa (vending) y ``""`` si la bodega no tiene tipo configurado.
+    """
+    return _tipos_docto(str(_dir())).get(codigo_siesa.strip().upper(), "")
+
+
+def bodega_no_se_carga(codigo_siesa: str) -> bool:
+    """True para las bodegas cuyos pedidos no se cargan a Siesa (hoy, las 4 de vending)."""
+    return tipo_docto_bodega(codigo_siesa) == NO_CARGA
 
 
 # ------------------------------------------------------------------- ciudades

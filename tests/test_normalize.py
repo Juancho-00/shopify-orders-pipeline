@@ -7,6 +7,7 @@ from shopify_pipeline.transform.normalize import (
     clean_text,
     normalize_phone,
     parse_documento,
+    separar_company,
     split_apellidos,
     split_nombres,
     to_bogota,
@@ -113,3 +114,19 @@ def test_to_bogota():
 
 def test_clean_text_quita_saltos():
     assert clean_text("Entregar\nen portería\t ") == "Entregar en portería"
+
+
+@pytest.mark.parametrize(
+    ("entrada", "documento", "empresa"),
+    [
+        ("1.017.000.001", "1.017.000.001", ""),
+        ("CC 43.123.456", "CC 43.123.456", ""),
+        ("NIT 900.123.456-7 Comercial Andina S.A.S.", "NIT 900.123.456-7", "COMERCIAL ANDINA S.A.S."),
+        ("Comercial Andina SAS - 900123456-7", "900123456-7", "COMERCIAL ANDINA SAS"),
+        ("900123456, Inversiones 3A SAS", "900123456", "INVERSIONES 3A SAS"),
+        ("", "", ""),
+        (None, "", ""),
+    ],
+)
+def test_separar_company(entrada, documento, empresa):
+    assert separar_company(entrada) == (documento, empresa)

@@ -6,7 +6,7 @@ Pipeline de integración **Shopify → Siesa** para Luisa Chimá S.A.S.
 |---|---|---|
 | 1. Extracción | Descarga los pedidos de Shopify y genera el reporte línea por línea para Siesa | ✅ Lista |
 | 2. Conciliación | Verifica que los pedidos reportados existan en Siesa | ✅ Lista |
-| 3. Carga a Siesa | Genera las plantillas de clientes y pedidos para Siesa | 🟡 En construcción: plantilla de clientes lista ([plantillas_siesa.md](docs/plantillas_siesa.md)) |
+| 3. Carga a Siesa | Genera las plantillas de clientes y pedidos para Siesa | ✅ Plantillas de clientes y de pedidos ([plantillas_siesa.md](docs/plantillas_siesa.md)) |
 
 ```
                   (1) extract                                 (1) transform
@@ -53,7 +53,7 @@ shopify-orders-pipeline/
 │   ├── reconciliation/      # Fase 2: exporte de Siesa vs. reportes de la fase 1
 │   │   ├── siesa_export.py  # Lee el exporte (xlsx/csv) y saca _num_docto_referencia
 │   │   └── run.py           # Cruce y reporte de conciliación
-│   └── erp/                 # Fase 3: plantillas de carga a Siesa (terceros, clientes, run)
+│   └── erp/                 # Fase 3: plantillas de carga a Siesa (terceros, clientes, pedidos, run)
 ├── scripts/
 │   ├── ejecutar_pipeline.ps1 # Corrida diaria (la usa la tarea programada)
 │   └── registrar_tarea.ps1   # Crea la tarea en el Programador de tareas de Windows
@@ -418,14 +418,15 @@ shopify-pipeline conciliar --strict              # código 3 si falta algún ped
 ```
 
 3. Revise `data/reconciliation/conciliacion_<fecha>.xlsx`. Los pedidos `FALTA_EN_SIESA`
-   aparecen primero; los `EN_SIESA` ya están cargados y muestran su `documento_siesa`.
+   aparecen primero; los `EN_SIESA` ya están cargados y muestran su `documento_siesa`. Los
+   de bodegas de vending salen como `NO_SE_CARGA` y no cuentan como faltantes.
 
 Solo cuentan los reportes oficiales (`pedidos_siesa_<run_id>.csv`). Los `_revision` se
 ignoran porque no se cargan a Siesa.
 
 ---
 
-## Fase 3: creación de clientes y pedidos en Siesa (en construcción)
+## Fase 3: creación de clientes y pedidos en Siesa
 
 Genera dos plantillas Excel para cargar en Siesa: primero **clientes** y luego **pedidos**
 (R-30). El cliente se sube con cada pedido, aunque ya exista (R-31). Un pedido al que le
@@ -434,20 +435,24 @@ falte un dato obligatorio no se sube (R-34).
 La estructura de cada columna (origen, valor fijo y transformación) está en
 [docs/plantillas_siesa.md](docs/plantillas_siesa.md).
 
-**Listo:** plantilla de clientes con sus 4 hojas (`Terceros`, `Clientes`, `Imptos y Reten`,
-`Ent. Dinamica Cliente`).
+Genera las dos plantillas de una vez:
+
+1. **Clientes** `terceros_<run_id>.xlsx`: `Terceros`, `Clientes`, `Imptos y Reten` y
+   `Ent. Dinamica Cliente`.
+2. **Pedidos** `pedidos_<run_id>.xlsx`: `Pedidos` (encabezado) y `Movto Pedidos comercial`
+   (detalle). El tipo de documento sale de la bodega (`CPW`, `CPT`, `CPM`) y el
+   consecutivo va por bloques.
 
 ```powershell
 shopify-pipeline plantillas                    # usa el reporte más reciente de la fase 1
 shopify-pipeline plantillas --input data\processed\siesa\pedidos_siesa_<run_id>.csv
 ```
 
-Escribe `data\siesa\cargas\terceros_<run_id>.xlsx` (un cliente por fila; 3 filas por cliente en
-`Imptos y Reten`) y
-`data\logs\plantillas_<run_id>.csv` con los pedidos que no se cargan por datos faltantes
-(`TERCERO_INCOMPLETO`) y las direcciones recortadas (`DIRECCION_TRUNCADA`).
-
-**Pendiente:** la plantilla de pedidos (`Pedidos` y `Movto Pedidos comercial`).
+Los archivos quedan en `data\siesa\cargas\`; se suben a Siesa primero los clientes y luego
+los pedidos. `data\logs\plantillas_<run_id>.csv` lista los pedidos que no se cargan y por
+qué (`TERCERO_INCOMPLETO`, `PEDIDO_INCOMPLETO`, `TIPO_DOCTO_SIN_EQUIVALENCIA`,
+`PEDIDO_BODEGAS_MIXTAS`): un pedido excluido no va en ninguna de las dos plantillas. Los
+pedidos de las bodegas de vending no se cargan a Siesa (`BODEGA_NO_SE_CARGA`, informativo).
 
 ---
 

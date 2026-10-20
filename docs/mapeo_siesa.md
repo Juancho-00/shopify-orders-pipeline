@@ -21,6 +21,7 @@ una sola dirección completa; no se mezclan campos de varias.
 | `segundo_nombre` | Nombre (segundo) | `billing_address.first_name` | Resto de palabras (`"Juan Pablo"` → `Pablo`) |
 | `primer_apellido` | Apellido uno | `billing_address.last_name` | Primer apellido; respeta partículas (`"De la Torre"`) |
 | `segundo_apellido` | Apellido dos | `billing_address.last_name` | Resto (`"Lozano Gutierrez"` → `Gutierrez`) |
+| `razon_social` | Razón social (solo NIT) | `billing_address.company` → respaldo `shipping_address.company` | El texto que acompaña al NIT, en MAYÚSCULAS (`NIT 900.123.456-7 Comercial Andina` → `COMERCIAL ANDINA`). Sin nombre: el de facturación + alerta `RAZON_SOCIAL_DESDE_NOMBRE`. Vacía para cédula |
 | `tipo_documento` | Documento (CC o NIT) | `billing_address.company` | Código Siesa: `C` = cédula, `N` = NIT (R-10). Ver *Reglas de documento* |
 | `numero_documento` | Número de documento | `billing_address.company` → respaldo `shipping_address.company` | Solo dígitos (quita puntos, espacios y prefijos) |
 | `digito_verificacion` | — | Calculado | Solo NIT: el escrito por el cliente o calculado con el algoritmo de la DIAN |
@@ -145,6 +146,7 @@ una fila por evento. El log no incluye datos personales del cliente.
 | `SIN_DOCUMENTO` | Pedido | El cliente no registró cédula/NIT en `company` |
 | `DOCUMENTO_INVALIDO` | Pedido | El documento no tiene entre 5 y 11 dígitos |
 | `DV_NIT_INVALIDO` | Pedido | El dígito de verificación escrito no coincide con el calculado |
+| `RAZON_SOCIAL_DESDE_NOMBRE` | Pedido | NIT sin nombre de empresa en `company`: la razón social se tomó del nombre de facturación |
 | `NIT_POR_VERIFICAR` | Pedido | 9 dígitos que empiezan por 8 o 9, pero no por 800/900/901 |
 | `TIPO_DOCUMENTO_NO_IDENTIFICADO` | Pedido | El número no tiene formato de CC ni de NIT (R-06) |
 | `TIPO_DOCUMENTO_SIN_CODIGO_SIESA` | Pedido | CE o pasaporte: Siesa aún no tiene código definido |

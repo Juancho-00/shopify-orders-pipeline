@@ -1,24 +1,24 @@
-bodega_shopify,codigo_siesa,descripcion_siesa
-D'Luchi - Kaba MallPlaza,LCM60,MALLPLAZA CALI
-Antioquia - D'Luchi - Kaba Vending Terminal Del Sur,LCM54,C.C. TERMINAL DEL SUR
-D'Luchi - Kaba Centro Comercial Centro Mayor,LCM08,C.C. CENTRO MAYOR
-D'Luchi - Kaba Centro Comercial Andino,LCM07,C.C. ANDINO
-D'Luchi - Kaba Centro Comercial Fundadores,LCM01,C.C. FUNDADORES
-D'Luchi - Kaba Centro Comercial Gran Plaza,LCM03,C.C. GRAN PLAZA
-D'Luchi - Kaba Centro Comercial La Central,LCM13,C.C. LA CENTRAL
-D'Luchi - Kaba Centro Comercial Megacentro,LCM00,C.C. MEGACENTRO
-D'Luchi - Kaba Centro Comercial Multiplaza,LCM09,C.C. MULTIPLAZA
-D'Luchi - Kaba Centro Comercial Parque Fabricato,LCM05,C.C. FABRICATO
-D'Luchi - Kaba Centro Comercial Plaza Bocagrande,LCM30,C.C. PLAZA BOCAGRANDE
-D'Luchi - Kaba Centro Comercial San Nicolas,LCM14,C.C. SAN NICOLAS
-D'Luchi - Kaba Centro Comercial Santa Fé Bogota,LCM06,C.C. SANTAFÉ BOGOTÁ
-D'Luchi - Kaba Centro Comercial Viva Barranquilla,LCM10,C.C. VIVA BARRANQUILLA
-D'Luchi - Kaba Centro Comercial Viva Tunja,LCM20,C.C. VIVA TUNJA
-D'Luchi - Kaba Vending Terminal Del Norte,LCM52,C.C. TERMINAL DEL NORTE
-D'Luchi - Kaba Vending Centro Comercial Los Molinos,LCM51,C.C. LOS MOLINOS
-D'Luchi - Kaba Vending Estación Niquia,LCM55,ESTACIÓN NIQUIA
-D'Luchi PT Guarne,LCD01,CEDI PT
-Melonn Barranquilla,LEC03,MELONN COLOMBIA (BARRANQUILLA) VTEX
-Melonn Bogotá,LEC04,MELONN COLOMBIA (BOGOTA) VTEX
-Melonn Medellin - Sabaneta,LEC02,MELONN COLOMBIA (MEDELLIN) VTEX
-Melonn Cali,LEC05,MELONN COLOMBIA (CALI) VTEX
+bodega_shopify,codigo_siesa,descripcion_siesa,tipo_docto_siesa
+D'Luchi - Kaba MallPlaza,LCM60,MALLPLAZA CALI,CPT
+Antioquia - D'Luchi - Kaba Vending Terminal Del Sur,LCM54,C.C. TERMINAL DEL SUR,NO_CARGA
+D'Luchi - Kaba Centro Comercial Centro Mayor,LCM08,C.C. CENTRO MAYOR,CPT
+D'Luchi - Kaba Centro Comercial Andino,LCM07,C.C. ANDINO,CPT
+D'Luchi - Kaba Centro Comercial Fundadores,LCM01,C.C. FUNDADORES,CPT
+D'Luchi - Kaba Centro Comercial Gran Plaza,LCM03,C.C. GRAN PLAZA,CPT
+D'Luchi - Kaba Centro Comercial La Central,LCM13,C.C. LA CENTRAL,CPT
+D'Luchi - Kaba Centro Comercial Megacentro,LCM00,C.C. MEGACENTRO,CPT
+D'Luchi - Kaba Centro Comercial Multiplaza,LCM09,C.C. MULTIPLAZA,CPT
+D'Luchi - Kaba Centro Comercial Parque Fabricato,LCM05,C.C. FABRICATO,CPT
+D'Luchi - Kaba Centro Comercial Plaza Bocagrande,LCM30,C.C. PLAZA BOCAGRANDE,CPT
+D'Luchi - Kaba Centro Comercial San Nicolas,LCM14,C.C. SAN NICOLAS,CPT
+D'Luchi - Kaba Centro Comercial Santa Fé Bogota,LCM06,C.C. SANTAFÉ BOGOTÁ,CPT
+D'Luchi - Kaba Centro Comercial Viva Barranquilla,LCM10,C.C. VIVA BARRANQUILLA,CPT
+D'Luchi - Kaba Centro Comercial Viva Tunja,LCM20,C.C. VIVA TUNJA,CPT
+D'Luchi - Kaba Vending Terminal Del Norte,LCM52,C.C. TERMINAL DEL NORTE,NO_CARGA
+D'Luchi - Kaba Vending Centro Comercial Los Molinos,LCM51,C.C. LOS MOLINOS,NO_CARGA
+D'Luchi - Kaba Vending Estación Niquia,LCM55,ESTACIÓN NIQUIA,NO_CARGA
+D'Luchi PT Guarne,LCD01,CEDI PT,CPW
+Melonn Barranquilla,LEC03,MELONN COLOMBIA (BARRANQUILLA) VTEX,CPM
+Melonn Bogotá,LEC04,MELONN COLOMBIA (BOGOTA) VTEX,CPM
+Melonn Medellin - Sabaneta,LEC02,MELONN COLOMBIA (MEDELLIN) VTEX,CPM
+Melonn Cali,LEC05,MELONN COLOMBIA (CALI) VTEX,CPM

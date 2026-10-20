@@ -97,8 +97,9 @@ def test_billing_null_usa_shipping(order):
 
 
 def test_nit_con_dv(order):
-    order["billing_address"]["company"] = "800.197.268-4"
+    order["billing_address"]["company"] = "800.197.268-4 Comercial Andina S.A.S."
     row = rows(order)[0]
+    assert row["razon_social"] == "COMERCIAL ANDINA S.A.S."  # el nombre sale de company
     assert (row["tipo_documento"], row["numero_documento"], row["digito_verificacion"]) == (
         "N",
         "800197268",
@@ -108,15 +109,31 @@ def test_nit_con_dv(order):
 
 
 def test_nit_inferido_queda_por_verificar(order):
-    order["billing_address"]["company"] = "850197268"  # 9 dígitos, pero no inicia en 800/900/901
+    order["billing_address"]["company"] = "850197268 Empresa X"  # 9 dígitos, no inicia en 800/900/901
     assert rows(order)[0]["tipo_documento"] == "N"
     assert codigos(order) == ["NIT_POR_VERIFICAR"]
 
 
 def test_nit_por_prefijo_sin_alerta(order):
-    order["billing_address"]["company"] = "900197268"  # R-06: 9 dígitos con prefijo 900
-    assert rows(order)[0]["tipo_documento"] == "N"
+    order["billing_address"]["company"] = "Comercial Andina SAS - 900197268"  # nombre antes del NIT
+    row = rows(order)[0]
+    assert (row["tipo_documento"], row["numero_documento"], row["razon_social"]) == (
+        "N",
+        "900197268",
+        "COMERCIAL ANDINA SAS",
+    )
     assert codigos(order) == []
+
+
+def test_nit_sin_nombre_de_empresa_usa_el_de_facturacion(order):
+    order["billing_address"]["company"] = "900197268"
+    row = rows(order)[0]
+    assert row["razon_social"] == "LAURA SOFÍA RESTREPO DE LA TORRE"
+    assert codigos(order) == ["RAZON_SOCIAL_DESDE_NOMBRE"]
+
+
+def test_cedula_no_lleva_razon_social(order):
+    assert rows(order)[0]["razon_social"] == ""
 
 
 def test_cedula_extranjeria_sin_codigo_siesa(order):

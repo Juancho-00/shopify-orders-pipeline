@@ -388,6 +388,10 @@ Fase 3: generar las plantillas de Siesa. La estructura de las plantillas está e
   `C001`, `1`, `500` y los datos del tercero), `Imptos y Reten` (`filas_impuestos`: 3 filas
   por cliente, agrupadas por clase de impuesto) y `Ent. Dinamica Cliente` (`fila_entidad`:
   el correo).
+- `erp/pedidos.py` → plantilla de pedidos. `validar_pedido` revisa cada línea (SKU, bodega,
+  cantidad, precio) y saca el tipo de documento de la bodega (`CPW`, `CPT`, `CPM`);
+  `numerar` asigna el consecutivo por bloques; `fila_pedido` arma el encabezado y
+  `filas_movimiento` el detalle.
 - `erp/run.py` → `generar_plantillas`: lee el reporte de la fase 1, deja una fila por
   cliente (la del pedido más reciente), escribe `terceros_<run_id>.xlsx` con las 4 hojas y el log
   `plantillas_<run_id>.csv`. `pedidos_cargables` dirá qué pedidos pueden ir en la
@@ -436,6 +440,7 @@ puede probar un 429, un 500 o un token vencido sin depender de la tienda real.
 | `test_state.py`         | Watermark, ventana incremental y registro de pedidos reportados                                                      |
 | `test_erp_terceros.py` | Fase 3, hoja Terceros: cédula vs. NIT, datos obligatorios y reparto de la dirección en 3 campos de 40 |
 | `test_erp_clientes.py` | Fase 3: valores fijos de `Clientes`, dirección en 2 campos, orden por bloques de `Imptos y Reten` y el correo en `Ent. Dinamica Cliente` |
+| `test_erp_run.py` (pedidos) | Tipo de documento por bodega, consecutivo por bloques CPW → CPT → CPM, envío como línea más, y que un pedido no cargable no quede en ninguna plantilla |
 | `test_erp_run.py` | Fase 3: el Excel de terceros (una fila por cliente, números y textos), el log de pedidos no cargables y el comando `plantillas` |
 | `test_catalogos.py`     | Bodegas y ciudades de Siesa: tildes, apóstrofos, nombres repetidos y casos que no se adivinan                      |
 | `test_reconciliation.py` | Fase 2 con exportes sintéticos: filas de título, CSV con `;`, referencias `1006.0`, faltantes y `--strict`       |

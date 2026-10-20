@@ -11,7 +11,8 @@ QUÉ HACE
 
 SALIDA
     data/reconciliation/conciliacion_<AAAAMMDDTHHMMSS>.csv / .xlsx
-        Un renglón por pedido con estado EN_SIESA o FALTA_EN_SIESA.
+        Un renglón por pedido con estado EN_SIESA, FALTA_EN_SIESA o NO_SE_CARGA (pedidos
+        de bodegas de vending, que no van a Siesa: no se buscan ni cuentan como faltantes).
 
     Además se avisa en la bitácora si una referencia aparece más de una vez en Siesa
     (no debería pasar: el permiso del usuario de Siesa lo impide, R-35).
@@ -29,6 +30,7 @@ from pathlib import Path
 
 from shopify_pipeline.reconciliation.siesa_export import ExporteSiesa, leer_exporte
 from shopify_pipeline.sinks.tabular import write_csv, write_xlsx
+from shopify_pipeline.transform.catalogos import bodega_no_se_carga
 from shopify_pipeline.transform.normalize import BOGOTA
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_EXPORTES_DIR = Path("data/siesa/exportes")
 DEFAULT_RECONCILIATION_DIR = Path("data/reconciliation")
 
-EN_SIESA, FALTA_EN_SIESA = "EN_SIESA", "FALTA_EN_SIESA"
+EN_SIESA, FALTA_EN_SIESA, NO_SE_CARGA = "EN_SIESA", "FALTA_EN_SIESA", "NO_SE_CARGA"
+_ORDEN_ESTADOS = {FALTA_EN_SIESA: 0, EN_SIESA: 1, NO_SE_CARGA: 2}  # Lo que hay que revisar, primero.
 
 COLUMNAS = (
     "estado",
@@ -75,6 +78,7 @@ class _Pedido:
     reporte_origen: str
     lineas: int = 0
     valor_total: Decimal = Decimal("0")
+    vending: bool = False  # Sale de una bodega que no se carga a Siesa.
 
 
 def _reportes(processed_dir: Path) -> Iterator[Path]:
@@ -119,6 +123,7 @@ def pedidos_reportados(processed_dir: Path, desde: date | None = None) -> dict[s
                     )
                 pedido.lineas += 1
                 pedido.valor_total += _decimal(row.get("valor_total_linea") or "")
+                pedido.vending = pedido.vending or bodega_no_se_carga(row.get("bodega_siesa") or "")
         pedidos.update({ref: asdict(p) for ref, p in actuales.items()})
     return pedidos
 
@@ -147,10 +152,13 @@ def conciliar(
     pedidos = pedidos_reportados(processed_dir, desde)
     filas: list[dict[str, object]] = []
     for ref, pedido in sorted(pedidos.items(), key=lambda kv: (str(kv[1]["fecha_compra"]), kv[0])):
-        estado = EN_SIESA if ref in exporte.referencias else FALTA_EN_SIESA
+        if pedido.pop("vending"):
+            estado = NO_SE_CARGA
+        else:
+            estado = EN_SIESA if ref in exporte.referencias else FALTA_EN_SIESA
         filas.append({"estado": estado, "documento_siesa": exporte.documentos.get(ref, ""), **pedido})
     # Primero los que faltan: es lo que hay que revisar.
-    filas.sort(key=lambda f: f["estado"] != FALTA_EN_SIESA)
+    filas.sort(key=lambda f: _ORDEN_ESTADOS[str(f["estado"])])
 
     marca = (ahora or datetime.now(timezone.utc)).astimezone(BOGOTA).strftime("%Y%m%dT%H%M%S")
     csv_file = output_dir / f"conciliacion_{marca}.csv"
@@ -160,14 +168,18 @@ def conciliar(
 
     resultado = Conciliacion(filas, exporte, csv_file, xlsx_file)
     desde_txt = f" desde {desde.isoformat()}" if desde else ""
+    vending = sum(1 for f in filas if f["estado"] == NO_SE_CARGA)
+    a_cargar = len(filas) - vending
+    if vending:
+        logger.info("%d pedidos de vending no se buscan en Siesa (no se cargan).", vending)
     if resultado.faltantes:
         logger.warning(
-            "Conciliación%s: %d de %d pedidos reportados NO están en Siesa. Detalle en %s",
+            "Conciliación%s: %d de %d pedidos NO están en Siesa. Detalle en %s",
             desde_txt,
             resultado.faltantes,
-            len(filas),
+            a_cargar,
             xlsx_file,
         )
     else:
-        logger.info("Conciliación%s: los %d pedidos reportados están en Siesa.", desde_txt, len(filas))
+        logger.info("Conciliación%s: los %d pedidos están en Siesa.", desde_txt, a_cargar)
     return resultado

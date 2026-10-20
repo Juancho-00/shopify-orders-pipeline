@@ -11,7 +11,10 @@ REGLAS (definidas el 2026-10-19)
     * ``F200_ID_TIPO_IDENT``: ``C`` cédula, ``N`` NIT.
     * ``F200_IND_TIPO_TERCERO``: siempre ``1``.
     * NIT: ``F200_RAZON_SOCIAL`` = nombre de la empresa; cédula: vacío.
-    * ``F015_CONTACTO``: nombre completo de la persona, o la razón social si es NIT.
+    * NIT: la razón social sale del campo ``company`` de Shopify (columna ``razon_social`` del
+      reporte); apellidos y nombres van vacíos.
+    * ``F015_CONTACTO``: nombre completo en orden APELLIDOS NOMBRES, o la razón social si es NIT.
+    * Email y teléfono son obligatorios: se necesitan para la facturación electrónica.
     * Direcciones 1, 2 y 3: máximo 40 caracteres cada una. Si la dirección no cabe en la
       1, sigue en la 2 (cortando entre palabras); el complemento va en la 3.
     * ``F015_ID_PAIS`` siempre ``169``; departamento (2 dígitos) y ciudad (3 dígitos) salen
@@ -25,6 +28,7 @@ Si falta un dato obligatorio, el tercero no se genera (R-34) y se devuelve qué 
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from shopify_pipeline.transform.catalogos import partes_ciudad
@@ -54,6 +58,8 @@ TERCEROS_COLUMNS: tuple[str, ...] = (
 )
 
 LARGO_DIRECCION = 40
+LARGO_MINIMO_TELEFONO = 7  # Fijo de 7 dígitos o celular de 10.
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 IND_TIPO_TERCERO = "1"
 ID_PAIS = "169"  # Colombia
 # Columnas que la plantilla de ejemplo guarda como número; las demás van como texto.
@@ -134,16 +140,20 @@ def fila_tercero(pedido: dict[str, str], fecha_carga: str) -> Tercero:
     nombres = _mayus(pedido.get("primer_nombre"), pedido.get("segundo_nombre"))
     apellido1 = _mayus(pedido.get("primer_apellido"))
     apellido2 = _mayus(pedido.get("segundo_apellido"))
-    completo = _mayus(nombres, apellido1, apellido2)
+    completo = _mayus(apellido1, apellido2, nombres)  # Orden de Siesa: APELLIDOS NOMBRES.
 
     es_nit = tipo == "N"
-    razon_social = completo if es_nit else ""  # Ver P-1b: de dónde sale el nombre de la empresa.
+    # Reportes anteriores a la columna razon_social: se usa el nombre de facturación.
+    razon_social = (
+        (_mayus(pedido.get("razon_social")) or _mayus(nombres, apellido1, apellido2)) if es_nit else ""
+    )
     contacto = razon_social if es_nit else completo
     dir1, dir2, dir3, truncada = repartir_direccion(
         pedido.get("direccion") or "", pedido.get("direccion_complemento") or ""
     )
     _, depto, ciudad = partes_ciudad((pedido.get("codigo_ciudad_siesa") or "").strip())
     telefono = normalize_phone(pedido.get("telefono") or "")  # Sin 57 / +57.
+    email = (pedido.get("email") or "").strip()
 
     faltantes = [
         nombre
@@ -153,11 +163,15 @@ def fila_tercero(pedido: dict[str, str], fecha_carga: str) -> Tercero:
             ("nombre" if not es_nit else "razon_social", contacto),
             ("direccion", dir1),
             ("codigo_ciudad_siesa", ciudad),
+            ("email", email if _EMAIL.fullmatch(email) else ""),
+            ("telefono", telefono if len(telefono) >= LARGO_MINIMO_TELEFONO else ""),
         )
         if not valor
     ]
     if not es_nit and not apellido1:
         faltantes.append("primer_apellido")
+    if not es_nit and not nombres:
+        faltantes.append("primer_nombre")
     alertas = ["DIRECCION_TRUNCADA"] if truncada else []
 
     fila = {
@@ -178,7 +192,7 @@ def fila_tercero(pedido: dict[str, str], fecha_carga: str) -> Tercero:
         "F015_ID_CIUDAD": ciudad,
         "F015_ID_BARRIO": "",
         "F015_TELEFONO": telefono,
-        "F015_EMAIL": (pedido.get("email") or "").strip(),
+        "F015_EMAIL": email,
         "F200_FECHA_NACIMIENTO": fecha_carga,
         "F015_CELULAR": telefono,
     }

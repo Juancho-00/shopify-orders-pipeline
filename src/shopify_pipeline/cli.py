@@ -17,7 +17,7 @@ QUÉ HACE
     shopify-pipeline extract --days 3 --filtrar-por actualizacion   # captura pagos confirmados tarde
     shopify-pipeline transform                      # rehace el reporte Siesa de la última extracción
     shopify-pipeline conciliar                      # fase 2: ¿los pedidos reportados ya están en Siesa?
-    shopify-pipeline plantillas                     # fase 3: plantilla de clientes para Siesa
+    shopify-pipeline plantillas                     # fase 3: plantillas de clientes y pedidos para Siesa
 
 Logs (en --log-dir, por defecto data/logs):
     shopify_pipeline_AAAAMMDD.log   # bitácora de cada ejecución del día
@@ -229,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     pl = sub.add_parser(
-        "plantillas", help="Fase 3: genera la plantilla de clientes (Terceros) para cargar a Siesa."
+        "plantillas", help="Fase 3: genera las plantillas de clientes y de pedidos para cargar a Siesa."
     )
     pl.add_argument(
         "--input",

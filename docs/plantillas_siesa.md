@@ -3,9 +3,8 @@
 Estructura de las dos plantillas Excel que se suben a Siesa, analizada a partir de los
 ejemplos del conector VTEX (`terceros_vtex.xlsx` y `pedidos_conector_*.xlsx`).
 
-> **Estado:** la **plantilla de clientes** (4 hojas) está definida e implementada (comando
-> `shopify-pipeline plantillas`). La plantilla de pedidos sigue como análisis de la
-> plantilla de ejemplo; sus preguntas están al final (regla **R-32**).
+> **Estado:** las **dos plantillas** (clientes con 4 hojas y pedidos con 2) están definidas
+> por TI e implementadas. Se generan juntas con `shopify-pipeline plantillas`.
 >
 > Los ejemplos originales tienen datos reales de clientes y **no se guardan en el
 > repositorio**. Los valores de este documento son fijos de la plantilla o ficticios.
@@ -46,11 +45,11 @@ corrida, va una sola vez con los datos de su pedido más reciente.
 | `F200_NIT` | Reporte | ✅ Igual a `F200_ID` |
 | `F200_ID_TIPO_IDENT` | Reporte | ✅ `C` = cédula, `N` = NIT (R-10) |
 | `F200_IND_TIPO_TERCERO` | Fijo | ✅ Siempre `1` |
-| `F200_RAZON_SOCIAL` | Reporte | ✅ Si es `N`: nombre de la empresa, en MAYÚSCULAS. Si es `C`: vacío. *Origen del nombre: P-1b* |
-| `F200_APELLIDO1` | Reporte | ✅ `primer_apellido` en MAYÚSCULAS. Vacío si es `N` *(P-1c)* |
+| `F200_RAZON_SOCIAL` | Reporte | ✅ Si es `N`: nombre de la empresa, que viene en el campo `company` de Shopify junto al NIT (`billing_address.company`, respaldo `shipping_address.company`), en MAYÚSCULAS. Si es `C`: vacío |
+| `F200_APELLIDO1` | Reporte | ✅ `primer_apellido` en MAYÚSCULAS. Si es `N`: vacío (igual apellido 2 y nombres) |
 | `F200_APELLIDO2` | Reporte | ✅ `segundo_apellido` en MAYÚSCULAS (puede ir vacío) |
 | `F200_NOMBRES` | Reporte | ✅ `primer_nombre` + `segundo_nombre` en MAYÚSCULAS |
-| `F015_CONTACTO` | Derivado | ✅ Nombre completo (`NOMBRES APELLIDO1 APELLIDO2`) o la razón social si es `N` *(orden: P-1d)* |
+| `F015_CONTACTO` | Derivado | ✅ Nombre completo en orden **APELLIDOS NOMBRES** (`RESTREPO GÓMEZ LAURA SOFÍA`) o la razón social si es `N` |
 | `F015_DIRECCION1` | Reporte | ✅ `direccion` (máx. 40 caracteres). Lo que no cabe sigue en la 2, sin partir palabras |
 | `F015_DIRECCION2` | Reporte | ✅ Continuación de la dirección (máx. 40). Si queda libre y el complemento es largo, lo usa el complemento |
 | `F015_DIRECCION3` | Reporte | ✅ `direccion_complemento` (apto, torre, referencias; máx. 40) |
@@ -72,9 +71,18 @@ pedido queda con la alerta `DIRECCION_TRUNCADA` para revisarlo.
 `F200_ID` y `F200_NIT` se escriben como número, igual que en la plantilla de ejemplo; las
 demás columnas como texto, para no perder ceros a la izquierda.
 
-Datos obligatorios para generar el tercero (R-34): documento, tipo, nombre (o razón social),
-primer apellido (solo cédula), dirección y ciudad con código Siesa. Si falta alguno, el
-pedido queda en `data/logs/plantillas_<run_id>.csv` con `TERCERO_INCOMPLETO` y no se carga.
+Datos obligatorios para generar el tercero (R-34): documento, tipo, razón social (NIT) o
+primer nombre y primer apellido (cédula), dirección, ciudad con código Siesa, **email** y
+**teléfono**. Email y teléfono son obligatorios porque se necesitan para la facturación
+electrónica; se valida que el email tenga forma `algo@dominio.ext` y que el teléfono tenga
+al menos 7 dígitos. Si falta alguno, el pedido queda en `data/logs/plantillas_<run_id>.csv`
+con `TERCERO_INCOMPLETO` (el detalle dice qué campo) y no se carga.
+
+> **Cómo escribe el cliente el NIT en Shopify:** número y nombre de la empresa en el mismo
+> campo `company`, en cualquier orden: `NIT 900.123.456-7 Comercial Andina S.A.S.` o
+> `Comercial Andina SAS - 900123456-7`. El pipeline separa el documento del nombre. Si un
+> NIT llega sin nombre de empresa, se usa el nombre de facturación y el pedido queda con la
+> alerta `RAZON_SOCIAL_DESDE_NOMBRE` para revisarlo antes de facturar.
 
 ### Hoja `Clientes`: el tercero como cliente (tabla F201)
 
@@ -103,7 +111,8 @@ y teléfono son idénticos en las dos hojas.
 | `F201_FECHA_INGRESO` | Derivado | Fecha de la carga `AAAAMMDD`, como texto (igual que la fecha de nacimiento) |
 | `f201_id_cobrador` | Fijo | `W001` |
 
-> **Nota sobre la dirección:** `Clientes` tiene 2 campos de dirección y `Terceros` tiene 3.
+> **Nota sobre la dirección (✅ confirmada por TI el 2026-10-20):** `Clientes` tiene 2 campos
+> de dirección y `Terceros` tiene 3.
 > El segundo campo de `Clientes` lleva lo que en `Terceros` está en los campos 2 y 3 (casi
 > siempre solo el complemento, como en el ejemplo de VTEX). Si los dos juntos pasan de 40
 > caracteres, se corta entre palabras y el pedido queda con `DIRECCION_TRUNCADA`
@@ -144,70 +153,105 @@ Las celdas vacías quedan vacías; el ejemplo guarda un texto vacío, que se ve 
 
 ## Plantilla 2: pedidos (`pedidos_*.xlsx`)
 
-`_consec_docto` une el encabezado con sus movimientos. Es un consecutivo **dentro del
-archivo**: 1, 2, 3... Siesa asigna el número real del pedido al cargarlo.
+✅ **Definida por TI el 2026-10-20** e implementada en `src/shopify_pipeline/erp/pedidos.py`.
+
+`Pedidos` es el **encabezado** del documento (una fila por pedido de Shopify) y
+`Movto Pedidos comercial` es el **detalle** (una fila por producto, más la del envío). Las
+une el par `_id_tipo_docto` + `_consec_docto`.
+
+**Tipo de documento según la bodega** (`catalogos/bodegas_siesa.csv`, columna
+`tipo_docto_siesa`):
+
+| Bodega | Tipo | Descripción Siesa |
+|---|---|---|
+| D'Luchi PT Guarne (`LCD01`) | `CPW` | Pedido de venta pág. web |
+| Tiendas D'Luchi - Kaba (`LCM..`) | `CPT` | Pedido PV pág. web |
+| Melonn (`LEC..`) | `CPM` | Pedidos de venta Melonn |
+| Vending: Terminal del Sur, Terminal del Norte, Los Molinos, Estación Niquia | `NO_CARGA` | **No se cargan a Siesa.** El pedido queda en el log como `BODEGA_NO_SE_CARGA` (informativo, no es un error) |
+
+**Consecutivo:** empieza en 1 y se reinicia por cada tipo de documento. Los pedidos van por
+bloques: primero todos los `CPW`, luego los `CPT` y al final los `CPM`; dentro de cada
+bloque, por fecha de compra. Ejemplo: `CPW-1, CPW-2, CPT-1, CPM-1, CPM-2`.
 
 ### Hoja `Pedidos`: encabezado, una fila por pedido
 
 | Columna | Origen | Valor / regla |
 |---|---|---|
-| `_id_co` | Fijo | `001` (centro de operación) |
-| `_id_tipo_docto` | Fijo | `CPM` |
-| `_consec_docto` | Derivado | 1, 2, 3... por pedido dentro del archivo (número) |
-| `_id_fecha(AAAAMMDD)` | Derivado* | El ejemplo trae la fecha de carga. *¿Fecha de compra o de carga? (P-2)* |
+| `_id_co` | Fijo | `001` |
+| `_id_tipo_docto` | Derivado | `CPW`, `CPT` o `CPM` según la bodega de salida (tabla de arriba) |
+| `_consec_docto` | Derivado | 1, 2, 3... por tipo de documento (número) |
+| `_id_fecha(AAAAMMDD)` | Derivado | Fecha de la carga, `AAAAMMDD` (`20261020`) |
 | `_ind_backorder` | Fijo | `4` |
-| `_id_tercero_fact` | Reporte | `numero_documento` |
+| `_id_tercero_fact` | Terceros | Número de identificación del cliente (número) |
 | `_id_sucursal_fact` | Fijo | `001` |
-| `_id_tercero_rem` | Reporte | `numero_documento` |
+| `_id_tercero_rem` | Terceros | Número de identificación del cliente (número) |
 | `_id_sucursal_rem` | Fijo | `001` |
 | `_id_co_fact` | Fijo | `001` |
-| `_fecha_entrega(AAAAMMDD)` | Derivado | Igual a `_id_fecha` en el ejemplo |
-| `_num_docto_referencia` | Reporte | `documento_referencia`: número Shopify sin `#` (R-12, R-21) |
-| `_id_cond_pago` | Fijo* | `03D` *(P-3)* |
-| `_notas` | Reporte | `notas` |
+| `_fecha_entrega(AAAAMMDD)` | Derivado | Fecha de la carga, `AAAAMMDD` |
+| `_num_docto_referencia` | Reporte | `documento_referencia`: número del pedido Shopify sin `#` (R-12, R-21) |
+| `_id_cond_pago` | Fijo | `03D` |
+| `_notas` | Reporte | `notas` del pedido de Shopify (vacío si no tiene). **Máximo 500 caracteres**: lo que sobre se corta y el pedido queda con `NOTAS_RECORTADAS` |
 | `_id_punto_envio` | Fijo | `000` |
-| `_id_tercero_vendedor` | Fijo | NIT del vendedor de la plantilla (ver archivo de ejemplo) |
+| `_id_tercero_vendedor` | Fijo | `900733097` |
 
 ### Hoja `Movto Pedidos comercial`: una fila por línea del pedido
 
 | Columna | Origen | Valor / regla |
 |---|---|---|
 | `_id_co` | Fijo | `001` |
-| `_id_tipo_docto` | Fijo | `CPM` |
-| `_consec_docto` | Derivado | El mismo del encabezado, **como texto** |
-| `_nro_registro` | Reporte | `numero_linea` (1, 2...) |
-| `_referencia_item` | Reporte | `referencia` (SKU). El envío usa `SERV01` (R-08) |
+| `_id_tipo_docto` | Pedidos | El mismo del encabezado |
+| `_consec_docto` | Pedidos | El mismo del encabezado, **como texto** |
+| `_nro_registro` | Derivado | 1 hasta n: un registro por producto y uno más para el envío si su valor es mayor a cero (número) |
+| `_referencia_item` | Reporte | SKU del producto (los mismos en Shopify y Siesa, sin equivalencias). El envío usa `SERV01` (R-08) |
 | `_id_ext1_COLOR` / `_id_ext2_TALLA` | — | Vacíos |
-| `_id_bodega` | Reporte | `bodega_siesa` (R-09). El envío usa la misma bodega que los productos |
+| `_id_bodega` | Reporte | `bodega_siesa`: bodega de donde sale el producto (R-09). El envío usa la de los productos |
 | `_id_motivo` | Fijo | `06` |
-| `_ind_obsequio` | Fijo | `0` |
+| `_ind_obsequio(0=No, 1=Si)` | Fijo | `0` |
 | `_id_co_movto` | Fijo | `001` |
 | `ccosto_movto` | — | Vacío |
 | `_fecha_entrega(AAAAMMDD)` | Derivado | La misma del encabezado |
 | `_id_lista_precio` | Fijo | `03` |
 | `_id_unidad_medida` | Fijo | `UND` |
-| `_cant_pedida_base` | Reporte | `cantidad`, como texto |
-| `_precio_unitario` | Reporte | `precio_neto` (con descuento aplicado, pesos enteros, IVA incluido; R-07, R-13), como texto |
-| `_ind_impto_asumido` | Fijo | `0` (no liquida) |
-| `ind_precio` | Fijo | `2` (liquida con el precio del registro) |
+| `_cant_pedida_base` | Reporte | `cantidad` que pidió el cliente, como texto |
+| `_precio_unitario` | Reporte | `precio_neto`: lo que pagó el cliente por unidad, con el descuento aplicado, en pesos enteros e IVA incluido (R-07, R-13), como texto |
+| `_ind_impto_asumido...` | Fijo | `0` (no liquida) |
+| `ind_precio (...)` | Fijo | `2` (liquida con el precio del registro) |
 
 Con `ind_precio = 2`, Siesa usa el precio que enviamos y no el de su lista de precios.
-Por eso el reporte manda el precio neto, con el descuento ya aplicado (R-13).
+Por eso se manda el precio neto, con el descuento ya aplicado (R-13).
+
+### Cuándo un pedido no se carga (R-34)
+
+Un pedido que no se puede cargar no va en **ninguna** de las dos plantillas: ni su
+encabezado, ni sus líneas, ni su cliente. Así nunca queda un cliente cargado sin su pedido
+o un pedido sin su cliente. Queda en `data/logs/plantillas_<run_id>.csv` con el motivo:
+
+| Código | Cuándo |
+|---|---|
+| `TERCERO_INCOMPLETO` | Falta un dato obligatorio del cliente (ver hoja `Terceros`) |
+| `PEDIDO_INCOMPLETO` | Una línea sin SKU, bodega, cantidad o precio; el detalle dice cuál |
+| `BODEGA_NO_SE_CARGA` | Pedido de una bodega de vending: no va a Siesa por definición. No cuenta como error (`--strict` no falla) |
+| `TIPO_DOCTO_SIN_EQUIVALENCIA` | La bodega no tiene tipo de documento configurado (p. ej. una bodega nueva en Shopify): agregarlo en `bodegas_siesa.csv` |
+| `PEDIDO_BODEGAS_MIXTAS` | Control: productos de bodegas con tipos distintos. Según TI no ocurre; si aparece, revisar |
+
+### Verificación contra la plantilla de ejemplo
+
+Con el pedido de prueba #1006, el archivo generado tiene las mismas 2 hojas, los mismos
+encabezados y el mismo tipo de dato por columna que `pedidos_conector_*.xlsx`; las celdas
+vacías quedan vacías.
 
 ---
 
-## Preguntas abiertas (resolver con R-32)
+## Preguntas (R-32)
 
 | # | Pregunta | Afecta |
 |---|---|---|
-| P-1 | ✅ `F200_IND_TIPO_TERCERO` siempre `1`; con NIT se llena `F200_RAZON_SOCIAL`. **Abiertas:** (b) de dónde sale el nombre de la empresa (ver nota); (c) si con NIT van vacíos apellidos y nombres; (d) orden del nombre en `F015_CONTACTO`; (e) si el NIT lleva las mismas clases de impuesto; (f) si el DV va en algún campo | Hojas `Terceros` e `Imptos y Reten` |
-| P-2 | `_id_fecha`: ¿fecha de compra en Shopify o fecha de carga a Siesa? ¿`_fecha_entrega` es siempre la misma? | Hojas `Pedidos` y `Movto` |
-| P-3 | `_id_cond_pago` = `03D` para todos los pedidos, ¿o los de contraentrega usan otra condición? | Hojas `Pedidos` y `Clientes` |
+| P-1 | ✅ `F200_IND_TIPO_TERCERO` siempre `1`; razón social desde `company`; con NIT apellidos y nombres vacíos; contacto APELLIDOS NOMBRES; el NIT lleva las mismas 3 filas de impuestos; el DV no va en la plantilla (es un cálculo, el NIT son 9 dígitos) | Hojas `Terceros` e `Imptos y Reten` |
+| P-2 | ✅ `_id_fecha` y `_fecha_entrega` = fecha de la carga (`20261020`) | Hojas `Pedidos` y `Movto` |
+| P-3 | ✅ Siempre `03D` | Hojas `Pedidos` y `Clientes` |
 | P-4 | ✅ Fecha de la carga `AAAAMMDD` (como texto) | Hojas `Terceros` y `Clientes` |
 | P-5 | Cédula de extranjería y pasaporte: ¿qué código de `F200_ID_TIPO_IDENT` usan? Hoy salen con la alerta `TIPO_DOCUMENTO_SIN_CODIGO_SIESA`. | Hoja `Terceros` |
-| P-6 | ¿Un archivo por corrida con todos los pedidos, o un archivo por pedido? ¿En qué carpeta los deja el pipeline para que alguien los suba? | Generador |
+| P-6 | ✅ Un archivo por plantilla y por corrida (`terceros_<run_id>.xlsx`, `pedidos_<run_id>.xlsx`) en `data/siesa/cargas/` | Generador |
+| P-7 | ✅ Las bodegas de vending no se cargan a Siesa; no hay pedidos con bodegas de tipos distintos; `_notas` admite 500 caracteres (2026-10-20) | Hoja `Pedidos` |
 
-> **Nota sobre P-1b:** en Shopify el campo `company` ya se usa para el número de documento,
-> así que no hay un campo propio para el nombre de la empresa. Hoy el pipeline usa el
-> nombre y apellido que el cliente escribió en facturación (p. ej. `COMERCIAL ANDINA S.A.S.`).
-> Si la empresa escribe ahí el nombre de una persona, la razón social saldrá con ese nombre.
+
