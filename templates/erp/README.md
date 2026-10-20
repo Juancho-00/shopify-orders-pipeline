@@ -1,18 +1,13 @@
-# Plantillas del ERP (fase 3)
+# Ejemplos de las plantillas de Siesa (solo en local)
 
-Aquí van las plantillas de carga del ERP para **clientes** y **pedidos**.
+Esta carpeta guarda, **solo en el equipo**, los archivos de ejemplo de las plantillas de
+carga de Siesa que sirvieron de referencia (por ejemplo `terceros_vtex.xlsx` y
+`pedidos_conector_*.xlsx`). Tienen datos reales de clientes, así que todo lo que hay aquí,
+excepto este README, está en `.gitignore` y nunca se sube al repositorio.
 
-Los archivos de esta carpeta (excepto este README) están en `.gitignore` porque
-pueden contener datos reales. La especificación de cada plantilla se documenta en
-`docs/` y se valida en código, así que no hace falta versionar los archivos originales.
+La especificación de cada columna (origen, valor fijo y regla) ya no está aquí sino en
+[`docs/plantillas_siesa.md`](../../docs/plantillas_siesa.md), y la generan
+`src/shopify_pipeline/erp/` y el comando `shopify-pipeline plantillas`.
 
-Por cada columna de cada plantilla se necesita:
-
-| Dato | Ejemplo |
-|---|---|
-| Nombre de la columna | `NIT_CLIENTE` |
-| Tipo de dato | texto, entero, decimal, fecha (formato) |
-| Longitud máxima / precisión | 20 caracteres; 2 decimales |
-| ¿Obligatoria? | sí / no |
-| Origen en Shopify o valor fijo | `order.customer.email`, constante `"001"` |
-| Reglas | mayúsculas, sin tildes, catálogo de valores permitidos |
+Si Siesa cambia la plantilla, guarde aquí el nuevo ejemplo y actualice
+`docs/plantillas_siesa.md` y el código de `erp/`.

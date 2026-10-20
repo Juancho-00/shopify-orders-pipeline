@@ -132,8 +132,9 @@ def test_ultimo_exporte_ignora_temporales_de_excel(tmp_path):
     (tmp_path / "~$b.xlsx").write_text("x")  # archivo de bloqueo de Excel abierto
     os.utime(viejo, (1, 1))
     assert ultimo_exporte(tmp_path) == nuevo
-    with pytest.raises(ConfigError):
+    with pytest.raises(ConfigError, match="Guarde el exporte"):
         ultimo_exporte(tmp_path / "no-existe")
+    assert (tmp_path / "no-existe").is_dir()  # la deja creada para la próxima vez
 
 
 def test_pedidos_reportados_agrupa_lineas_y_excluye_revision(processed):

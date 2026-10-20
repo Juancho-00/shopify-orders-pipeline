@@ -58,7 +58,7 @@ el límite de llamadas. Los pasos 13 a 15 no llaman a Shopify.
 src/shopify_pipeline/
 ├── __init__.py          Marca la carpeta como paquete y define la versión
 ├── __main__.py          Permite ejecutar "python -m shopify_pipeline"
-├── cli.py               Comandos de terminal (extract, transform, conciliar) → códigos de salida
+├── cli.py               Comandos de terminal (extract, transform, conciliar, plantillas) → códigos de salida
 ├── logs.py              Bitácora: consola + archivo diario
 ├── config.py            Lee el .env y valida dominio y credenciales
 ├── exceptions.py        Los tipos de error con nombre propio
@@ -83,13 +83,17 @@ src/shopify_pipeline/
 ├── reconciliation/      Fase 2: ¿los pedidos reportados están en Siesa?
 │   ├── siesa_export.py  Lee el exporte de Siesa y saca los números de pedido
 │   └── run.py           Cruza y escribe el reporte de conciliación
-└── erp/                 Fase 3: plantillas de Siesa (en construcción)
-    └── terceros.py      Pedido del reporte → fila de la hoja Terceros
+└── erp/                 Fase 3: plantillas de carga a Siesa
+    ├── terceros.py      Pedido del reporte → fila de la hoja Terceros
+    ├── clientes.py      Hojas Clientes, Imptos y Reten y Ent. Dinamica Cliente
+    ├── pedidos.py       Plantilla de pedidos: tipo de documento, consecutivo, encabezado y detalle
+    └── run.py           Orquesta la fase 3: reporte → terceros_<run>.xlsx + pedidos_<run>.xlsx
 ```
 
 **Regla para orientarse:** los archivos de `shopify/` saben de Shopify pero no de Siesa. Los
 de `transform/` saben de Siesa pero no llaman a Shopify. `extract.py` y `transform/run.py`
-coordinan, y `cli.py` solo traduce lo que escribe el usuario.
+coordinan, y `cli.py` solo traduce lo que escribe el usuario. `reconciliation/` y `erp/`
+no llaman a Shopify: trabajan sobre el reporte que dejó la fase 1.
 
 ---
 

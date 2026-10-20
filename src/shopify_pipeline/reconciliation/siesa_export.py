@@ -149,7 +149,11 @@ def leer_exporte(path: Path, columna: str | None = None) -> ExporteSiesa:
 def ultimo_exporte(carpeta: Path) -> Path:
     """El exporte más reciente de la carpeta (por fecha de modificación)."""
     if not carpeta.is_dir():
-        raise ConfigError(f"No existe la carpeta de exportes de Siesa: {carpeta}")
+        # Primera vez: se crea la carpeta para que la persona sepa dónde dejar el exporte.
+        carpeta.mkdir(parents=True, exist_ok=True)
+        raise ConfigError(
+            f"Guarde el exporte de pedidos de Siesa (.xlsx o .csv) en {carpeta} y vuelva a ejecutar."
+        )
     archivos = [
         p for p in carpeta.iterdir() if p.suffix.lower() in EXTENSIONES and not p.name.startswith(("~$", "."))
     ]

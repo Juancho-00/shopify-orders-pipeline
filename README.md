@@ -28,7 +28,7 @@ Shopify ────────────────────────
 ```
 shopify-orders-pipeline/
 ├── src/shopify_pipeline/
-│   ├── cli.py               # Comando `shopify-pipeline` (extract, transform) y códigos de salida
+│   ├── cli.py               # Comando `shopify-pipeline` (extract, transform, conciliar, plantillas)
 │   ├── logs.py              # Bitácora: consola + archivo diario
 │   ├── config.py            # Configuración desde variables de entorno / .env
 │   ├── exceptions.py        # Jerarquía de errores (auth, permisos, transitorios...)
@@ -37,7 +37,9 @@ shopify-orders-pipeline/
 │   │   ├── client.py        # HTTP: reintentos, rate limiting, paginación por Link header
 │   │   ├── orders.py        # Filtros de pedidos y extracción
 │   │   └── fulfillment.py   # Bodega de salida de cada línea (fulfillment orders)
-│   ├── catalogos/           # Tablas de equivalencia Siesa: bodegas y ciudades (CSV)
+│   ├── catalogos/           # Tablas de equivalencia Siesa (se editan a mano)
+│   │   ├── bodegas_siesa.csv  # Bodega Shopify → código Siesa y tipo de documento (CPW/CPT/CPM/NO_CARGA)
+│   │   └── ciudades_siesa.csv # Ciudades de Siesa: 169 + DANE
 │   ├── transform/
 │   │   ├── normalize.py     # Nombres, apellidos, cédula/NIT, teléfono, fechas, montos
 │   │   ├── catalogos.py     # Bodega Shopify → código Siesa; ciudad → código 169+DANE
@@ -53,18 +55,22 @@ shopify-orders-pipeline/
 │   ├── reconciliation/      # Fase 2: exporte de Siesa vs. reportes de la fase 1
 │   │   ├── siesa_export.py  # Lee el exporte (xlsx/csv) y saca _num_docto_referencia
 │   │   └── run.py           # Cruce y reporte de conciliación
-│   └── erp/                 # Fase 3: plantillas de carga a Siesa (terceros, clientes, pedidos, run)
+│   └── erp/                 # Fase 3: plantillas de carga a Siesa
+│       ├── terceros.py      # Hoja Terceros (datos del cliente, dirección en 3 campos de 40)
+│       ├── clientes.py      # Hojas Clientes, Imptos y Reten, Ent. Dinamica Cliente
+│       ├── pedidos.py       # Plantilla de pedidos: encabezado y detalle, tipo de documento, consecutivo
+│       └── run.py           # Reporte de la fase 1 → terceros_<run>.xlsx + pedidos_<run>.xlsx
 ├── scripts/
 │   ├── ejecutar_pipeline.ps1 # Corrida diaria (la usa la tarea programada)
 │   └── registrar_tarea.ps1   # Crea la tarea en el Programador de tareas de Windows
 ├── tests/                   # Pruebas sin red (Shopify simulado con `responses`)
 │   └── fixtures/            # Respuestas de ejemplo de Shopify (anonimizadas)
-├── templates/erp/           # Plantillas de carga del ERP (fase 3; no se versionan)
-├── data/                    # Salidas locales (no se versionan: datos personales)
+├── templates/erp/           # Ejemplos reales de las plantillas de Siesa, solo en local (no se versionan)
+├── data/                    # Datos de cada corrida (no se versionan: datos personales; ver abajo)
 ├── docs/
 │   ├── guia_codigo.md       # Para qué sirve cada archivo .py, explicado paso a paso
 │   ├── mapeo_siesa.md       # Origen y regla de cada columna del reporte (para el ticket de Siesa)
-│   ├── reglas_negocio.md    # Reglas de negocio decididas y pendientes (fases 1, 2 y 3)
+│   ├── reglas_negocio.md    # Reglas de negocio de las fases 1, 2 y 3
 │   ├── plantillas_siesa.md  # Columnas de las plantillas de clientes y pedidos de Siesa
 │   ├── ejecucion_programada.md # Cómo dejarlo corriendo solo cada día
 │   └── decisiones.md        # Decisiones técnicas y su motivo
@@ -72,6 +78,20 @@ shopify-orders-pipeline/
 ├── .env.example             # Plantilla de credenciales (sin secretos)
 ├── .pre-commit-config.yaml  # ruff + gitleaks (bloquea tokens en commits)
 └── pyproject.toml           # Dependencias, comando CLI, configuración de ruff/pytest
+```
+
+Carpeta `data/` (la crea el pipeline; vive en Google Drive y no se sube a git):
+
+```
+data/
+├── raw/shopify/orders/      # (1) Pedidos tal como los entrega Shopify: <run_id>.jsonl + manifiesto
+├── processed/siesa/         # (1) Reporte línea por línea: pedidos_siesa_<run_id>.csv / .xlsx
+├── siesa/
+│   ├── exportes/            # (2) Aquí se guarda a mano el exporte de pedidos de Siesa
+│   └── cargas/              # (3) Plantillas listas para subir: terceros_<run_id>.xlsx, pedidos_<run_id>.xlsx
+├── reconciliation/          # (2) Resultado de la conciliación: conciliacion_<fecha>.xlsx
+├── state/                   # Memoria entre corridas: watermark.json y reportados.json (no borrar)
+└── logs/                    # Bitácora diaria, alertas_<run_id>.csv, plantillas_<run_id>.csv, ejecuciones.csv
 ```
 
 ---
