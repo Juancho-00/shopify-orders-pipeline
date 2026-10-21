@@ -47,7 +47,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Python,
 
-    [string]$RepoDir = (Split-Path -Parent $PSScriptRoot),
+    [string]$RepoDir = "",
 
     [ValidateRange(0, 120)]
     [int]$EsperaReintentoMin = 10,
@@ -56,7 +56,25 @@ param(
     [int]$EsperaCarpetaMin = 15
 )
 
+# En Windows PowerShell 5.1, $PSScriptRoot puede llegar vacío en los valores por defecto
+# de param() (pasa al ejecutar con "powershell -File"). Por eso se calcula aquí.
+if (-not $RepoDir) {
+    $carpetaScript = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $RepoDir = Split-Path -Parent $carpetaScript
+}
+
 $ErrorActionPreference = "Stop"
+
+# Registro local de la última ejecución, FUERA de Google Drive: si la tarea se abre y se
+# cierra sola (Python no encontrado, G: sin montar), aquí queda qué pasó.
+#   %LOCALAPPDATA%\shopify-pipeline\ultima_tarea.log
+try {
+    $registroLocal = Join-Path $env:LOCALAPPDATA "shopify-pipeline\ultima_tarea.log"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $registroLocal) | Out-Null
+    Start-Transcript -Path $registroLocal -Force | Out-Null
+} catch {
+    # Sin registro local no se detiene la corrida.
+}
 
 # Significado de cada código de salida del pipeline (ver README, "Códigos de salida").
 $Significados = @{
@@ -73,8 +91,12 @@ function Invoke-Pipeline {
     # Los logs de Python salen por stderr. En Windows PowerShell 5.1, con
     # ErrorActionPreference = "Stop", eso se toma como error y corta el script; por eso
     # aquí se relaja a "Continue". "| Out-Host" muestra la salida sin mezclarla con el código.
+    # Cada línea se convierte a texto para que la consola no la pinte como error rojo.
+    # PYTHONIOENCODING y OutputEncoding evitan que las tildes salgan como "dÝas".
     $ErrorActionPreference = "Continue"
-    & $Python -m shopify_pipeline @Argumentos 2>&1 | Out-Host
+    $env:PYTHONIOENCODING = "utf-8"
+    try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+    & $Python -m shopify_pipeline @Argumentos 2>&1 | ForEach-Object { "$_" } | Out-Host
     return $LASTEXITCODE
 }
 
@@ -100,7 +122,7 @@ function Get-Significado {
 }
 
 if (-not (Test-Path -LiteralPath $Python)) {
-    [Console]::Error.WriteLine("No existe el ejecutable de Python: $Python")
+    Write-Host ("ERROR: " + "No existe el ejecutable de Python: $Python") -ForegroundColor Red
     exit 2
 }
 
@@ -108,7 +130,7 @@ if (-not (Test-Path -LiteralPath $Python)) {
 $limite = (Get-Date).AddMinutes($EsperaCarpetaMin)
 while (-not (Test-Path -LiteralPath (Join-Path $RepoDir "pyproject.toml"))) {
     if ((Get-Date) -ge $limite) {
-        [Console]::Error.WriteLine("La carpeta del repo no está disponible: $RepoDir (¿Google Drive sin iniciar?)")
+        Write-Host ("ERROR: " + "La carpeta del repo no está disponible: $RepoDir (¿Google Drive sin iniciar?)") -ForegroundColor Red
         exit 1
     }
     Start-Sleep -Seconds 30

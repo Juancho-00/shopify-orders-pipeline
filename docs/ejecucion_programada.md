@@ -233,6 +233,36 @@ Los de vending salen como `NO_SE_CARGA` y no se buscan.
 
 La bitácora completa del día está en `data\logs\shopify_pipeline_AAAAMMDD.log`.
 
+## Si la tarea no corrió
+
+Si en `data\logs\ejecuciones.csv` no aparece la línea del día, la tarea no llegó a ejecutar
+el pipeline. Revisar en este orden:
+
+1. **Registro local de la última ejecución:** `%LOCALAPPDATA%\shopify-pipeline\ultima_tarea.log`
+   (pegar esa ruta en el Explorador de archivos). Está fuera de Google Drive, así que se
+   escribe aunque la unidad G: no esté disponible. Dice, por ejemplo, si no encontró Python o
+   si Drive no montó la carpeta.
+2. **Estado de la tarea** (en PowerShell):
+
+   ```powershell
+   Get-ScheduledTask -TaskName "Shopify Pipeline - Corrida diaria" | Select-Object State
+   Get-ScheduledTaskInfo -TaskName "Shopify Pipeline - Corrida diaria" | Select-Object LastRunTime, LastTaskResult, NextRunTime
+   ```
+
+   | Resultado | Significado | Qué hacer |
+   |---|---|---|
+   | `State: Disabled` | La tarea está desactivada | `Enable-ScheduledTask -TaskName "Shopify Pipeline - Corrida diaria"` |
+   | `State: Running` | Está corriendo (p. ej. esperando a que Drive monte G:) | Esperar hasta 15 minutos |
+   | `LastTaskResult: 267011` | Nunca ha corrido | El equipo no tenía sesión iniciada a la hora programada |
+   | `LastTaskResult: 2147942402` | No encuentra un archivo (script o Python) | Volver a registrar la tarea (paso 6) |
+   | `LastTaskResult: 0`, `2`, `4`... | Corrió; es el código del pipeline | Ver la tabla de la *Revisión diaria* |
+
+3. **Probarla sin esperar a mañana:** `Start-ScheduledTask -TaskName "Shopify Pipeline - Corrida diaria"`.
+
+> Los scripts se ejecutan **desde la carpeta del repo** (`cd "G:\Unidades compartidas\..."`)
+> y con `-Python "<ruta>"`. Con doble clic sobre el `.ps1` la ventana se abre y se cierra sin
+> hacer nada, porque falta ese parámetro.
+
 ## Cambiar o quitar la tarea
 
 ```powershell

@@ -33,8 +33,15 @@ param(
 
     [string]$NombreTarea = "Shopify Pipeline - Corrida diaria",
 
-    [string]$RepoDir = (Split-Path -Parent $PSScriptRoot)
+    [string]$RepoDir = ""
 )
+
+# En Windows PowerShell 5.1, $PSScriptRoot puede llegar vacío en los valores por defecto
+# de param() (pasa al ejecutar con "powershell -File"). Por eso se calcula aquí.
+if (-not $RepoDir) {
+    $carpetaScript = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $RepoDir = Split-Path -Parent $carpetaScript
+}
 
 $ErrorActionPreference = "Stop"
 
